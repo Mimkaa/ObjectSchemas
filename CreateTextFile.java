@@ -19,7 +19,7 @@ public class CreateTextFile {
         }
 
         String fileName = null;
-        String targetPath = System.getProperty("user.dir"); // Default: current working directory
+        String targetPath = null; // Null means "use current working directory"
         String content = "";     // Default: empty file
 
         // Parse command-line arguments
@@ -52,6 +52,11 @@ public class CreateTextFile {
         // Ensure .txt extension
         if (!fileName.endsWith(".txt")) {
             fileName += ".txt";
+        }
+
+        // Use current directory if targetPath is not provided
+        if (targetPath == null || targetPath.isEmpty()) {
+            targetPath = System.getProperty("user.dir");
         }
 
         // Construct full file path
