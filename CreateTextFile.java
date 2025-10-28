@@ -19,8 +19,8 @@ public class CreateTextFile {
         }
 
         String fileName = null;
-        String targetPath = null; // Null means "use current working directory"
-        String content = "";     // Default: empty file
+        String targetPath = System.getProperty("user.dir"); // Default: current working directory
+        String content = ""; // Default: empty file
 
         // Parse command-line arguments
         for (int i = 0; i < args.length; i++) {
@@ -32,7 +32,10 @@ public class CreateTextFile {
                     break;
                 case "--path":
                     if (i + 1 < args.length) {
-                        targetPath = args[++i];
+                        String pathArg = args[++i];
+                        if (!pathArg.isEmpty()) { // Only override if non-empty
+                            targetPath = pathArg;
+                        }
                     }
                     break;
                 case "--content":
@@ -44,7 +47,7 @@ public class CreateTextFile {
         }
 
         // Validate required parameter
-        if (fileName == null) {
+        if (fileName == null || fileName.isEmpty()) {
             System.out.println("❌ Error: Missing required parameter --name");
             return;
         }
@@ -52,11 +55,6 @@ public class CreateTextFile {
         // Ensure .txt extension
         if (!fileName.endsWith(".txt")) {
             fileName += ".txt";
-        }
-
-        // Use current directory if targetPath is not provided
-        if (targetPath == null || targetPath.isEmpty()) {
-            targetPath = System.getProperty("user.dir");
         }
 
         // Construct full file path
@@ -67,7 +65,7 @@ public class CreateTextFile {
             System.out.println("⚠️ File already exists: " + file.getAbsolutePath());
         } else {
             try {
-                // Ensure parent directories exist
+                // Ensure parent directories exist (only if path is non-empty)
                 if (file.getParentFile() != null) {
                     file.getParentFile().mkdirs();
                 }
