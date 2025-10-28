@@ -12,14 +12,14 @@ public class CreateTextFile {
                   java CreateTextFile --name <fileName> [--path <targetPath>] [--content <textContent>]
 
                 Examples:
-                  java CreateTextFile --name notes.txt
-                  java CreateTextFile --name todo.txt --path ./projects --content "Buy milk"
+                  java CreateTextFile --name notes
+                  java CreateTextFile --name todo --path ./projects --content "Buy milk"
                 """);
             return;
         }
 
         String fileName = null;
-        String targetPath = "."; // Default: current directory
+        String targetPath = System.getProperty("user.dir"); // Default: current working directory
         String content = "";     // Default: empty file
 
         // Parse command-line arguments
@@ -49,6 +49,11 @@ public class CreateTextFile {
             return;
         }
 
+        // Ensure .txt extension
+        if (!fileName.endsWith(".txt")) {
+            fileName += ".txt";
+        }
+
         // Construct full file path
         File file = new File(targetPath, fileName);
 
@@ -58,7 +63,9 @@ public class CreateTextFile {
         } else {
             try {
                 // Ensure parent directories exist
-                file.getParentFile().mkdirs();
+                if (file.getParentFile() != null) {
+                    file.getParentFile().mkdirs();
+                }
 
                 // Write content
                 try (FileWriter writer = new FileWriter(file)) {
