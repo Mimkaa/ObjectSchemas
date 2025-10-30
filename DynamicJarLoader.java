@@ -2,7 +2,6 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.*;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.util.*;
 
 public class DynamicJarLoader {
@@ -72,7 +71,7 @@ public class DynamicJarLoader {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--library":
+                case "--library" -> {
                     if (i + 1 < args.length) {
                         String[] parts = args[++i].split(":");
                         if (parts.length == 3) {
@@ -83,18 +82,14 @@ public class DynamicJarLoader {
                             System.out.println("❌ Invalid format for --library. Use group:artifact:version");
                             return;
                         }
+                    } else {
+                        System.out.println("❌ Missing value for --library");
+                        return;
                     }
-                    break;
-
-                case "--group":
-                    if (i + 1 < args.length) groupId = args[++i];
-                    break;
-                case "--artifact":
-                    if (i + 1 < args.length) artifactId = args[++i];
-                    break;
-                case "--version":
-                    if (i + 1 < args.length) version = args[++i];
-                    break;
+                }
+                case "--group" -> { if (i + 1 < args.length) groupId = args[++i]; }
+                case "--artifact" -> { if (i + 1 < args.length) artifactId = args[++i]; }
+                case "--version" -> { if (i + 1 < args.length) version = args[++i]; }
             }
         }
 
