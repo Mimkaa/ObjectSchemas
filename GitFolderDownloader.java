@@ -1,7 +1,7 @@
 import java.io.*;
 import java.net.*;
 import java.nio.file.*;
-import org.json.*;
+import java.util.*;
 
 public class GitFolderDownloader {
 
@@ -18,8 +18,7 @@ public class GitFolderDownloader {
 
     public void downloadFolder(String remoteFolder) throws IOException {
         // Sanitize folder string
-        remoteFolder = remoteFolder.replace("\\", "/");
-
+        remoteFolder = remoteFolder.replace("\\", "/").replace(" ", "%20");
         String apiUrl = "https://api.github.com/repos/" + owner + "/" + repo
                 + "/contents/" + remoteFolder + "?ref=" + branch;
 
@@ -31,7 +30,7 @@ public class GitFolderDownloader {
         } catch (FileNotFoundException e) {
             if (!remoteFolder.equals(defaultFolder)) {
                 System.out.println("⚠️ Folder not found " + remoteFolder + ". Falling back to default " + defaultFolder);
-                downloadFolder(defaultFolder); // recursive fallback
+                downloadFolder(defaultFolder);  // recursive fallback
                 return;
             } else {
                 System.out.println("❌ Default folder also not found " + defaultFolder);
@@ -39,8 +38,16 @@ public class GitFolderDownloader {
             }
         }
 
-        JSONArray files = new JSONArray(json);
-        if (files.length() == 0) {
+        // Simple manual JSON parsing to extract download URLs
+        List<String> downloadUrls = new ArrayList<>();
+        String[] entries = json.split("\"download_url\":");
+        for (int i = 1; i < entries.length; i++) {
+            String part = entries[i];
+            String url = part.split("\"")[1]; // take the first string after "download_url":
+            downloadUrls.add(url);
+        }
+
+        if (downloadUrls.isEmpty()) {
             System.out.println("⚠️ No files found in folder " + remoteFolder);
             return;
         }
@@ -51,12 +58,10 @@ public class GitFolderDownloader {
             Files.createDirectories(folderPath);
         }
 
-        for (int i = 0; i < files.length(); i++) {
-            JSONObject fileObj = files.getJSONObject(i);
-            String url = fileObj.getString("download_url");
-            String fileName = fileObj.getString("name");
+        // Download files
+        for (String url : downloadUrls) {
+            String fileName = url.substring(url.lastIndexOf('/') + 1);
             Path localPath = folderPath.resolve(fileName);
-
             System.out.println("⬇️ Downloading " + fileName + " to " + localPath);
             try (InputStream in = new URL(url).openStream()) {
                 Files.copy(in, localPath, StandardCopyOption.REPLACE_EXISTING);
@@ -68,7 +73,7 @@ public class GitFolderDownloader {
     }
 
     public static void main(String[] args) throws IOException {
-        String folderName = "PythonStuff"; // default
+        String folderName = "PythonStuff";  // default
         for (int i = 0; i < args.length; i++) {
             if ("--name".equals(args[i]) && i + 1 < args.length) {
                 folderName = args[i + 1];
@@ -95,19 +100,19 @@ public class GitFolderDownloader {
         Files.delete(folderPath);
         System.out.println("🗑️ Deleted folder " + folderPath);
 
-        // --- Open a new CMD in current folder and setup Python environment ---
+        // Open a new CMD in current folder and setup Python environment
         System.out.println("📁 Setting up Python environment in folder " + currentDir);
-
         try {
-            String[] cmd = {
-                    "cmd.exe", "/c", String.join(" && ",
-                            "python -m venv venv",
-                            "venv\\Scripts\\activate",
-                            "if exist requirements.txt pip install -r requirements.txt",
-                            "python Interactive_prompt.py"
-                    )
-            };
-            new ProcessBuilder(cmd).directory(currentDir.toFile()).start();
+            String cmd = String.join(" && ",
+                    "python -m venv venv",
+                    "venv\\Scripts\\activate",
+                    "if exist requirements.txt pip install -r requirements.txt",
+                    "python Interactive_prompt.py"
+            );
+
+            new ProcessBuilder("cmd.exe", "/c", "start", "cmd.exe", "/K", "cd /d " + currentDir + " && " + cmd)
+                    .start();
+
         } catch (IOException e) {
             System.out.println("❌ Failed to setup Python environment or run script: " + e.getMessage());
         }
