@@ -43,11 +43,17 @@ public class GitFolderDownloader {
             return;
         }
 
+        // Create folder locally if it doesn't exist
+        Path folderPath = Paths.get(remoteFolder);
+        if (!Files.exists(folderPath)) {
+            Files.createDirectories(folderPath);
+        }
+
         for (int i = 1; i < parts.length; i++) {
             String url = parts[i].split("\"")[0];
             String fileName = url.substring(url.lastIndexOf("/") + 1);
-            Path localPath = Paths.get(fileName);
-            System.out.println("⬇️ Downloading: " + fileName);
+            Path localPath = folderPath.resolve(fileName);
+            System.out.println("⬇️ Downloading: " + fileName + " to " + localPath);
             try (InputStream in = new URL(url).openStream()) {
                 Files.copy(in, localPath, StandardCopyOption.REPLACE_EXISTING);
             }
@@ -69,24 +75,31 @@ public class GitFolderDownloader {
         downloader.downloadFolder(folderName);
         System.out.println("✅ Done downloading folder: " + folderName);
 
-        // --- Open a new Command Prompt and setup Python environment ---
-        String currentDir = System.getProperty("user.dir");
-        System.out.println("📁 Setting up Python environment in: " + currentDir);
+        // --- Open a new CMD in the downloaded folder and setup Python environment ---
+        Path folderPath = Paths.get(folderName).toAbsolutePath();
+        System.out.println("📁 Setting up Python environment in folder: " + folderPath);
 
         try {
-            // Windows batch command: create venv, activate, install requirements
+            // Windows batch commands:
+            // 1. cd into folder
+            // 2. create venv
+            // 3. activate venv
+            // 4. install requirements.txt if it exists
+            // 5. run Interactive_prompt.py
             String cmd = String.join(" && ",
+                    "cd /d \"" + folderPath + "\"",
                     "python -m venv venv",
                     "venv\\Scripts\\activate",
-                    "if exist requirements.txt pip install -r requirements.txt"
+                    "if exist requirements.txt pip install -r requirements.txt",
+                    "python Interactive_prompt.py"
             );
 
             ProcessBuilder pb = new ProcessBuilder(
-                    "cmd.exe", "/c", "start", "cmd.exe", "/K", "cd /d \"" + currentDir + "\" && " + cmd
+                    "cmd.exe", "/c", "start", "cmd.exe", "/K", cmd
             );
             pb.start();
         } catch (IOException e) {
-            System.out.println("❌ Failed to setup Python environment: " + e.getMessage());
+            System.out.println("❌ Failed to setup Python environment or run script: " + e.getMessage());
         }
     }
 }
