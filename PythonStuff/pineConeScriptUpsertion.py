@@ -37,16 +37,21 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "A Java utility to rebase the core logic to a different folder or in other words download the folder with the core functionality from github"
+            "A Java utility that allows the user to update the first line of any specified text file with a custom string provided via command-line arguments. "
+            "If the file does not already exist, it is automatically created. This tool is useful for keeping configuration files, logs, or any text-based records "
+            "up-to-date with a simple and programmatic approach, ensuring the first line always reflects the latest intended value."
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "GitFolderDownloader",
-            "usage":
-                "java GitFolderDownloader --name FolderName\n",
-
+            "script_name": "TextFileUpdate",
+            "usage": (
+                "java TextFileUpdate --file myfile.txt \"New first line\"\n"
+            )
         }
-    },
+    }
 ]
+
+
+
 
 # --- Find the highest vec number already in Pinecone ---
 existing_vectors = index.query(vector=[0]*dimension, top_k=1000, include_metadata=False, include_values=False)
