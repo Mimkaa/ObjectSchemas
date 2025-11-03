@@ -23,7 +23,7 @@ public class GitFolderDownloader {
 
         System.out.println("📡 Fetching file list from: " + apiUrl);
 
-        String json = null;
+        String json;
         try {
             json = new String(new URL(apiUrl).openStream().readAllBytes());
         } catch (FileNotFoundException e) {
@@ -69,17 +69,24 @@ public class GitFolderDownloader {
         downloader.downloadFolder(folderName);
         System.out.println("✅ Done downloading folder: " + folderName);
 
-        // --- Open a new Command Prompt in the current working directory ---
+        // --- Open a new Command Prompt and setup Python environment ---
         String currentDir = System.getProperty("user.dir");
-        System.out.println("📁 Opening new CMD at: " + currentDir);
+        System.out.println("📁 Setting up Python environment in: " + currentDir);
 
         try {
+            // Windows batch command: create venv, activate, install requirements
+            String cmd = String.join(" && ",
+                    "python -m venv venv",
+                    "venv\\Scripts\\activate",
+                    "if exist requirements.txt pip install -r requirements.txt"
+            );
+
             ProcessBuilder pb = new ProcessBuilder(
-                    "cmd.exe", "/c", "start", "cmd.exe", "/K", "cd /d \"" + currentDir + "\""
+                    "cmd.exe", "/c", "start", "cmd.exe", "/K", "cd /d \"" + currentDir + "\" && " + cmd
             );
             pb.start();
         } catch (IOException e) {
-            System.out.println("❌ Failed to open new CMD: " + e.getMessage());
+            System.out.println("❌ Failed to setup Python environment: " + e.getMessage());
         }
     }
 }
