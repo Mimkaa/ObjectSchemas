@@ -16,6 +16,7 @@ public class GitFolderDownloader {
     }
 
     public void downloadFolder(String remoteFolder) throws IOException {
+        // sanitize folder string
         remoteFolder = remoteFolder.replace("\\", "/").replace(":", "");
         String apiUrl = "https://api.github.com/repos/" + owner + "/" + repo
                 + "/contents/" + remoteFolder + "?ref=" + branch;
@@ -67,5 +68,18 @@ public class GitFolderDownloader {
         GitFolderDownloader downloader = new GitFolderDownloader("Mimkaa", "ObjectSchemas", "main");
         downloader.downloadFolder(folderName);
         System.out.println("✅ Done downloading folder: " + folderName);
+
+        // --- Open a new Command Prompt in the current working directory ---
+        String currentDir = System.getProperty("user.dir");
+        System.out.println("📁 Opening new CMD at: " + currentDir);
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "cmd.exe", "/c", "start", "cmd.exe", "/K", "cd /d \"" + currentDir + "\""
+            );
+            pb.start();
+        } catch (IOException e) {
+            System.out.println("❌ Failed to open new CMD: " + e.getMessage());
+        }
     }
 }
