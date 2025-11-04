@@ -4,13 +4,14 @@ import java.util.*;
 
 public class TextFileUpdate {
     public static void main(String[] args) {
-        if (args.length < 3 || !args[0].equals("--file")) {
-            System.out.println("Usage: java TextFileUpdate --file <file_name> <new_first_line>");
+        // Expected usage: java TextFileUpdate --file <file_name> --line "<new_first_line>"
+        if (args.length < 4 || !args[0].equals("--file") || !args[2].equals("--line")) {
+            System.out.println("Usage: java TextFileUpdate --file <file_name> --line \"<new_first_line>\"");
             return;
         }
 
         String fileName = args[1];
-        String newLine = args[2];
+        String newLine = args[3];
         Path filePath = Paths.get(fileName);
 
         try {
@@ -20,25 +21,25 @@ public class TextFileUpdate {
                 System.out.println("Created file: " + fileName);
             }
 
-            // Read existing lines (if any)
+            // Read existing lines
             List<String> lines = new ArrayList<>();
             if (Files.size(filePath) > 0) {
                 lines = Files.readAllLines(filePath);
             }
 
-            // Update first line or add it if empty
+            // Update or add first line
             if (lines.isEmpty()) {
                 lines.add(newLine);
             } else {
                 lines.set(0, newLine);
             }
 
-            // Write back to file (overwrite existing content)
+            // Write updated content
             Files.write(filePath, lines, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
 
-            System.out.println("Updated first line of " + fileName + " to: " + newLine);
+            System.out.println("✅ Updated first line of " + fileName + " to: " + newLine);
         } catch (IOException e) {
-            System.err.println("Error updating file: " + e.getMessage());
+            System.err.println("❌ Error updating file: " + e.getMessage());
         }
     }
 }
