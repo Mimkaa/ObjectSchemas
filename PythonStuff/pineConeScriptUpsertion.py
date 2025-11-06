@@ -37,18 +37,21 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "A Java utility that allows the user to update the first line of any specified text file with a custom string provided via command-line arguments. "
-            "If the file does not already exist, it is automatically created. This tool is useful for keeping configuration files, logs, or any text-based records "
-            "up-to-date with a simple and programmatic approach, ensuring the first line always reflects the latest intended value."
+            "A Java utility that dynamically generates a Java class at runtime using Byte Buddy. "
+            "The user can specify the class name via command-line arguments, and the generated class "
+            "includes a private field 'name' and a public method 'sayHello()' that returns a greeting. "
+            "The class is saved as a .class file in the current directory. This tool is useful for "
+            "creating temporary or runtime-generated classes for testing, dynamic behaviors, or educational purposes."
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "TextFileUpdate",
+            "script_name": "DynamicClassCreator",
             "usage": (
-                "java TextFileUpdate --file myfile.txt \"New first line\"\n"
+                "java DynamicClassCreator --name MyGeneratedClass\n"
             )
         }
     }
 ]
+
 
 
 
