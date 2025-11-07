@@ -46,6 +46,13 @@ public class DynamicClassCreator {
     }
 
     /**
+     * Finds a static method by name in a class.
+     */
+    private static Method findStaticMethod(Class<?> cls, String methodName, Class<?>... paramTypes) throws NoSuchMethodException {
+        return cls.getMethod(methodName, paramTypes);
+    }
+
+    /**
      * Creates a dynamic class with a private field 'name' and a public 'sayHello' method.
      * Returns the generated class bytes.
      */
@@ -61,6 +68,10 @@ public class DynamicClassCreator {
             Class<?> fixedValueClass = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
             Class<?> implementationClass = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
             Class<?> dynamicTypeClass = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
+            
+            // Load TypeDefinition and TypeDescription classes
+            Class<?> typeDefinitionClass = Class.forName("net.bytebuddy.description.type.TypeDefinition", true, loader);
+            Class<?> typeForLoadedTypeClass = Class.forName("net.bytebuddy.description.type.TypeDescription$ForLoadedType", true, loader);
 
             Object byteBuddy = byteBuddyClass.getDeclaredConstructor().newInstance();
 
@@ -72,16 +83,37 @@ public class DynamicClassCreator {
             Method nameMethod = findMethodRecursive(builder, "name", String.class);
             builder = nameMethod.invoke(builder, className);
 
-            // Define private field 'name'
-            Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, Class.class, int.class);
-            builder = defineFieldMethod.invoke(builder, "name", String.class, Modifier.PRIVATE);
+            // Define private field 'name' - try different signatures
+            try {
+                // First try with TypeDefinition
+                Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, typeDefinitionClass, int.class);
+                Object stringTypeDefinition = typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
+                builder = defineFieldMethod.invoke(builder, "name", stringTypeDefinition, Modifier.PRIVATE);
+                System.out.println("✅ Defined field 'name' with TypeDefinition");
+            } catch (NoSuchMethodException e) {
+                // Fallback to Class
+                Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, Class.class, int.class);
+                builder = defineFieldMethod.invoke(builder, "name", String.class, Modifier.PRIVATE);
+                System.out.println("✅ Defined field 'name' with Class");
+            }
 
-            // Define public method 'sayHello' returning String
-            Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, Class.class, int.class);
-            Object methodBuilder = defineMethod.invoke(builder, "sayHello", String.class, Modifier.PUBLIC);
+            // Define public method 'sayHello' returning String - try different signatures
+            Object methodBuilder;
+            try {
+                // First try with TypeDefinition
+                Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, typeDefinitionClass, int.class);
+                Object stringTypeDefinition = typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
+                methodBuilder = defineMethod.invoke(builder, "sayHello", stringTypeDefinition, Modifier.PUBLIC);
+                System.out.println("✅ Defined method 'sayHello' with TypeDefinition");
+            } catch (NoSuchMethodException e) {
+                // Fallback to Class
+                Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, Class.class, int.class);
+                methodBuilder = defineMethod.invoke(builder, "sayHello", String.class, Modifier.PUBLIC);
+                System.out.println("✅ Defined method 'sayHello' with Class");
+            }
 
-            // Create FixedValue instance
-            Method valueMethod = findMethodRecursive(fixedValueClass, "value", Object.class);
+            // Create FixedValue instance - use static method call
+            Method valueMethod = findStaticMethod(fixedValueClass, "value", Object.class);
             Object fixedValueInstance = valueMethod.invoke(null, "Hello from " + className + "!");
 
             // Intercept method
