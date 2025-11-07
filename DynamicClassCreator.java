@@ -1,14 +1,13 @@
 import java.io.File;
 import java.io.FileOutputStream;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
-import java.lang.reflect.Modifier;
 
 /**
- * Creates dynamic classes using Byte Buddy via reflection.
- * Automatically finds a Byte Buddy JAR starting with "byte-buddy".
+ * Fully reflection-safe DynamicClassCreator for modern Byte Buddy versions.
  */
 public class DynamicClassCreator {
 
@@ -27,6 +26,29 @@ public class DynamicClassCreator {
         return jars[0]; // pick the first one found
     }
 
+    /**
+     * Recursively finds a method by name in the object class or any of its interfaces/superclasses.
+     */
+    private static Method findMethodRecursive(Object obj, String methodName, Class<?>... paramTypes) throws NoSuchMethodException {
+        Class<?> cls = obj.getClass();
+        while (cls != null) {
+            try {
+                return cls.getMethod(methodName, paramTypes);
+            } catch (NoSuchMethodException ignored) {}
+            for (Class<?> iface : cls.getInterfaces()) {
+                try {
+                    return iface.getMethod(methodName, paramTypes);
+                } catch (NoSuchMethodException ignored) {}
+            }
+            cls = cls.getSuperclass();
+        }
+        throw new NoSuchMethodException(methodName);
+    }
+
+    /**
+     * Creates a dynamic class with a private field 'name' and a public 'sayHello' method.
+     * Returns the generated class bytes.
+     */
     public byte[] createDynamicClass(String className) throws Exception {
         if (!byteBuddyJar.exists()) {
             throw new IllegalStateException("Byte Buddy JAR not found: " + byteBuddyJar.getAbsolutePath());
@@ -35,49 +57,46 @@ public class DynamicClassCreator {
         URL jarUrl = byteBuddyJar.toURI().toURL();
         try (URLClassLoader loader = new URLClassLoader(new URL[]{jarUrl}, getClass().getClassLoader())) {
 
-            // Load Byte Buddy classes
             Class<?> byteBuddyClass = Class.forName("net.bytebuddy.ByteBuddy", true, loader);
-            Class<?> dynamicTypeBuilderClass = Class.forName("net.bytebuddy.dynamic.DynamicType$Builder", true, loader);
             Class<?> fixedValueClass = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
             Class<?> implementationClass = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
-            Class<?> dynamicTypeUnloadedClass = Class.forName("net.bytebuddy.dynamic.DynamicType$Unloaded", true, loader);
+            Class<?> dynamicTypeClass = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
 
-            // Instantiate ByteBuddy
             Object byteBuddy = byteBuddyClass.getDeclaredConstructor().newInstance();
 
-            // builder = new ByteBuddy().subclass(Object.class)
-            Method subclassMethod = byteBuddyClass.getMethod("subclass", Class.class);
+            // Subclass Object
+            Method subclassMethod = findMethodRecursive(byteBuddy, "subclass", Class.class);
             Object builder = subclassMethod.invoke(byteBuddy, Object.class);
 
-            // builder = builder.name(className)
-            Method nameMethod = dynamicTypeBuilderClass.getMethod("name", String.class);
+            // Set class name
+            Method nameMethod = findMethodRecursive(builder, "name", String.class);
             builder = nameMethod.invoke(builder, className);
 
-            // builder = builder.defineField("name", String.class, Modifier.PRIVATE)
-            Method defineFieldMethod = dynamicTypeBuilderClass.getMethod("defineField", String.class, Class.class, int.class);
+            // Define private field 'name'
+            Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, Class.class, int.class);
             builder = defineFieldMethod.invoke(builder, "name", String.class, Modifier.PRIVATE);
 
-            // methodBuilder = builder.defineMethod("sayHello", String.class, Modifier.PUBLIC)
-            Method defineMethod = dynamicTypeBuilderClass.getMethod("defineMethod", String.class, Class.class, int.class);
+            // Define public method 'sayHello' returning String
+            Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, Class.class, int.class);
             Object methodBuilder = defineMethod.invoke(builder, "sayHello", String.class, Modifier.PUBLIC);
 
-            // fixedValueInstance = FixedValue.value("Hello from <className>!")
-            Method valueMethod = fixedValueClass.getMethod("value", Object.class);
+            // Create FixedValue instance
+            Method valueMethod = findMethodRecursive(fixedValueClass, "value", Object.class);
             Object fixedValueInstance = valueMethod.invoke(null, "Hello from " + className + "!");
 
-            // builder = methodBuilder.intercept(fixedValueInstance)
-            Method interceptMethod = methodBuilder.getClass().getMethod("intercept", implementationClass);
-            builder = interceptMethod.invoke(methodBuilder, fixedValueInstance);
+            // Intercept method
+            Method interceptMethod = findMethodRecursive(methodBuilder, "intercept", implementationClass);
+            Object interceptedBuilder = interceptMethod.invoke(methodBuilder, fixedValueInstance);
 
-            // unloaded = builder.make()
-            Method makeMethod = builder.getClass().getMethod("make");
-            Object unloaded = makeMethod.invoke(builder);
+            // Build class
+            Method makeMethod = findMethodRecursive(interceptedBuilder, "make");
+            Object dynamicType = makeMethod.invoke(interceptedBuilder);
 
-            // bytes = unloaded.getBytes()
-            Method getBytesMethod = dynamicTypeUnloadedClass.getMethod("getBytes");
-            byte[] bytes = (byte[]) getBytesMethod.invoke(unloaded);
+            // Get bytes
+            Method getBytesMethod = findMethodRecursive(dynamicType, "getBytes");
+            byte[] bytes = (byte[]) getBytesMethod.invoke(dynamicType);
 
-            // Save to file
+            // Save class file
             Path classFile = Path.of(className + ".class");
             try (FileOutputStream fos = new FileOutputStream(classFile.toFile())) {
                 fos.write(bytes);
