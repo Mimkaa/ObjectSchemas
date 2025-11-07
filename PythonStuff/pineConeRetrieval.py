@@ -18,7 +18,6 @@ class ScriptRetriever:
         self.usage = None
 
     def _save_to_file(self, file_path: str, content: str):
-        """Save content to a file with UTF-8 encoding and Unix-style line endings."""
         try:
             with open(file_path, "w", encoding="utf-8", newline='\n') as f:
                 f.write(content)
@@ -29,7 +28,7 @@ class ScriptRetriever:
             return False
 
     def _update_last_loaded_script(self):
-        """Update LastLoadedScript.txt with the latest script info."""
+        """Update LastLoadedScript.txt with the chosen script info."""
         if not all([self.script_name, self.prompt]):
             print("❌ Cannot update LastLoadedScript.txt: script_name or prompt missing.")
             return False
@@ -38,9 +37,23 @@ class ScriptRetriever:
         content = f"{self.script_name}\n{self.prompt}\n{self.usage or ''}\n"
         return self._save_to_file(last_loaded_path, content)
 
+    def _download_script(self, script_name: str):
+        """Download a single script from GitHub."""
+        url = f"{self.github_raw_base}{script_name}.java"
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            response.encoding = 'utf-8'
+            file_path = os.path.join(os.getcwd(), f"{script_name}.java")
+            if self._save_to_file(file_path, response.text):
+                return file_path, response.text
+        except Exception as e:
+            print(f"❌ Failed to download {script_name} from {url}: {e}")
+        return None, None
+
     def retrieve(self, prompt: str):
-        """Retrieve the closest matching script for the given prompt."""
-        print(f"🧠 Retrieving script for prompt: {prompt}")
+        """Retrieve the best matching script for the given prompt using GPT evaluation."""
+        print(f"🧠 Retrieving top 3 scripts for prompt: {prompt}")
         self.prompt = prompt
 
         # --- Generate embedding ---
@@ -50,10 +63,10 @@ class ScriptRetriever:
         )
         query_vector = response.data[0].embedding
 
-        # --- Query Pinecone ---
+        # --- Query Pinecone for top 3 matches ---
         results = self.index.query(
             vector=query_vector,
-            top_k=1,
+            top_k=3,
             include_metadata=True
         )
 
@@ -61,41 +74,61 @@ class ScriptRetriever:
             print("❌ No matching scripts found in Pinecone.")
             return None
 
-        # --- Retrieve metadata ---
-        best_match = results.matches[0]
-        self.script_name = best_match.metadata.get("script_name")
-        self.usage = best_match.metadata.get("usage", "")
+        scripts_info = []
+        for match in results.matches:
+            script_name = match.metadata.get("script_name")
+            usage = match.metadata.get("usage", "")
+            if not script_name:
+                continue
+            file_path, content = self._download_script(script_name)
+            if file_path:
+                scripts_info.append({
+                    "script_name": script_name,
+                    "usage": usage,
+                    "file_path": file_path,
+                    "content": content
+                })
 
-        if not self.script_name:
-            print("❌ Metadata for script_name missing.")
+        if not scripts_info:
+            print("❌ No scripts could be downloaded.")
             return None
 
-        # --- Download script ---
-        script_url = f"{self.github_raw_base}{self.script_name}.java"
+        # --- Ask GPT to choose the best script ---
+        gpt_prompt = "You are a helpful assistant. Given the user's request and descriptions of 3 Java scripts, choose the one that best fits the prompt.\n\n"
+        gpt_prompt += f"User prompt:\n{prompt}\n\n"
+        gpt_prompt += "Scripts descriptions:\n"
+        for i, script in enumerate(scripts_info, 1):
+            gpt_prompt += f"{i}. Name: {script['script_name']}, Description/Usage: {script['usage']}\n"
+
+        gpt_prompt += "\nReply with the number of the best script choice."
+
         try:
-            response = requests.get(script_url, timeout=10)
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            completion = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": gpt_prompt}],
+                temperature=0
+            )
+            choice_text = completion.choices[0].message.content.strip()
+            choice_index = int(choice_text) - 1
         except Exception as e:
-            print(f"❌ Failed to download script from {script_url}: {e}")
-            return None
+            print(f"❌ GPT evaluation failed: {e}")
+            choice_index = 0  # fallback to first script
 
-        file_path = os.path.join(os.getcwd(), f"{self.script_name}.java")
-        if not self._save_to_file(file_path, response.text):
-            return None
+        if choice_index < 0 or choice_index >= len(scripts_info):
+            choice_index = 0
+
+        chosen_script = scripts_info[choice_index]
+        self.script_name = chosen_script["script_name"]
+        self.usage = chosen_script["usage"]
 
         # --- Update LastLoadedScript.txt ---
         if not self._update_last_loaded_script():
             return None
 
-        print("✅ LastLoadedScript.txt updated.")
-        return file_path
+        print(f"✅ Chosen script: {self.script_name}")
+        return chosen_script["file_path"]
 
     def run(self):
-        """
-        Always retrieve the script for the current prompt.
-        Ensures script_name, prompt, and LastLoadedScript.txt are updated.
-        """
         if not self.prompt:
             print("❌ Cannot run: prompt not set. Please set retriever.prompt first.")
             return False

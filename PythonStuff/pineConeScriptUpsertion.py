@@ -37,20 +37,34 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "A Java utility that dynamically generates a Java class at runtime using Byte Buddy. "
-            "The user can specify the class name via command-line arguments, and the generated class "
-            "includes a private field 'name' and a public method 'sayHello()' that returns a greeting. "
-            "The class is saved as a .class file in the current directory. This tool is useful for "
-            "creating temporary or runtime-generated classes for testing, dynamic behaviors, or educational purposes."
+            "A Java utility that downloads a specific folder from a GitHub repository, moves its contents "
+            "to the current working directory, deletes the temporary folder, and optionally sets up a Python "
+            "virtual environment to run scripts. It supports a fallback folder if the specified one is missing "
+            "and provides clear CLI feedback during download and setup."
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "DynamicClassCreator",
+            "script_name": "GitFolderDownloader",
             "usage": (
-                "java DynamicClassCreator --name MyGeneratedClass\n"
+                "java GitFolderDownloader --name PythonStuff\n"
+                "java GitFolderDownloader --name SomeOtherFolder"
+            ),
+            "description": (
+                "Downloads all files from a GitHub repository folder, moves them to the current directory, "
+                "removes the downloaded folder, and initializes a Python virtual environment to run scripts. "
+                "Supports default folder fallback and verbose CLI output."
             )
         }
     }
 ]
+
+
+
+
+
+
+
+
+
 
 
 

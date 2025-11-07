@@ -4,9 +4,10 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
+import java.lang.reflect.Modifier;
 
 /**
- * Responsible for generating dynamic classes using Byte Buddy.
+ * Creates dynamic classes using Byte Buddy via reflection.
  * Automatically finds a Byte Buddy JAR starting with "byte-buddy".
  */
 public class DynamicClassCreator {
@@ -26,10 +27,6 @@ public class DynamicClassCreator {
         return jars[0]; // pick the first one found
     }
 
-    /**
-     * Creates a dynamic class with a private field 'name' and a public 'sayHello' method.
-     * Returns the generated class bytes.
-     */
     public byte[] createDynamicClass(String className) throws Exception {
         if (!byteBuddyJar.exists()) {
             throw new IllegalStateException("Byte Buddy JAR not found: " + byteBuddyJar.getAbsolutePath());
@@ -38,37 +35,49 @@ public class DynamicClassCreator {
         URL jarUrl = byteBuddyJar.toURI().toURL();
         try (URLClassLoader loader = new URLClassLoader(new URL[]{jarUrl}, getClass().getClassLoader())) {
 
+            // Load Byte Buddy classes
             Class<?> byteBuddyClass = Class.forName("net.bytebuddy.ByteBuddy", true, loader);
+            Class<?> dynamicTypeBuilderClass = Class.forName("net.bytebuddy.dynamic.DynamicType$Builder", true, loader);
             Class<?> fixedValueClass = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
-            Class<?> dynamicTypeClass = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
+            Class<?> implementationClass = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
+            Class<?> dynamicTypeUnloadedClass = Class.forName("net.bytebuddy.dynamic.DynamicType$Unloaded", true, loader);
 
+            // Instantiate ByteBuddy
             Object byteBuddy = byteBuddyClass.getDeclaredConstructor().newInstance();
 
-            Method subclass = byteBuddyClass.getMethod("subclass", Class.class);
-            Object subclassStep = subclass.invoke(byteBuddy, Object.class);
+            // builder = new ByteBuddy().subclass(Object.class)
+            Method subclassMethod = byteBuddyClass.getMethod("subclass", Class.class);
+            Object builder = subclassMethod.invoke(byteBuddy, Object.class);
 
-            Method nameMethod = subclassStep.getClass().getMethod("name", String.class);
-            Object namedStep = nameMethod.invoke(subclassStep, className);
+            // builder = builder.name(className)
+            Method nameMethod = dynamicTypeBuilderClass.getMethod("name", String.class);
+            builder = nameMethod.invoke(builder, className);
 
-            Method defineField = namedStep.getClass().getMethod("defineField", String.class, Class.class, int.class);
-            Object withField = defineField.invoke(namedStep, "name", String.class, java.lang.reflect.Modifier.PRIVATE);
+            // builder = builder.defineField("name", String.class, Modifier.PRIVATE)
+            Method defineFieldMethod = dynamicTypeBuilderClass.getMethod("defineField", String.class, Class.class, int.class);
+            builder = defineFieldMethod.invoke(builder, "name", String.class, Modifier.PRIVATE);
 
-            Method defineMethod = withField.getClass().getMethod("defineMethod", String.class, Class.class, int.class);
-            Object methodStep = defineMethod.invoke(withField, "sayHello", String.class, java.lang.reflect.Modifier.PUBLIC);
+            // methodBuilder = builder.defineMethod("sayHello", String.class, Modifier.PUBLIC)
+            Method defineMethod = dynamicTypeBuilderClass.getMethod("defineMethod", String.class, Class.class, int.class);
+            Object methodBuilder = defineMethod.invoke(builder, "sayHello", String.class, Modifier.PUBLIC);
 
-            Method fixedValue = fixedValueClass.getMethod("value", Object.class);
-            Object fixedValueInstance = fixedValue.invoke(null, "Hello from " + className + "!");
+            // fixedValueInstance = FixedValue.value("Hello from <className>!")
+            Method valueMethod = fixedValueClass.getMethod("value", Object.class);
+            Object fixedValueInstance = valueMethod.invoke(null, "Hello from " + className + "!");
 
-            Method intercept = methodStep.getClass().getMethod("intercept",
-                    Class.forName("net.bytebuddy.implementation.Implementation", true, loader));
-            Object intercepted = intercept.invoke(methodStep, fixedValueInstance);
+            // builder = methodBuilder.intercept(fixedValueInstance)
+            Method interceptMethod = methodBuilder.getClass().getMethod("intercept", implementationClass);
+            builder = interceptMethod.invoke(methodBuilder, fixedValueInstance);
 
-            Method make = intercepted.getClass().getMethod("make");
-            Object unloaded = make.invoke(intercepted);
+            // unloaded = builder.make()
+            Method makeMethod = builder.getClass().getMethod("make");
+            Object unloaded = makeMethod.invoke(builder);
 
-            Method getBytes = dynamicTypeClass.getMethod("getBytes");
-            byte[] bytes = (byte[]) getBytes.invoke(unloaded);
+            // bytes = unloaded.getBytes()
+            Method getBytesMethod = dynamicTypeUnloadedClass.getMethod("getBytes");
+            byte[] bytes = (byte[]) getBytesMethod.invoke(unloaded);
 
+            // Save to file
             Path classFile = Path.of(className + ".class");
             try (FileOutputStream fos = new FileOutputStream(classFile.toFile())) {
                 fos.write(bytes);
