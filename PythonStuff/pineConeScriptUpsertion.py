@@ -37,28 +37,24 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "A Java utility that downloads a specific folder from a GitHub repository, moves its contents "
-            "to the current working directory, deletes the temporary folder, and optionally sets up a Python "
-            "virtual environment to run scripts. It supports a fallback folder if the specified one is missing "
-            "and provides clear CLI feedback during download and setup."
+            "A Java utility that dynamically adds methods from any delegate class to existing compiled Java classes. "
+            "It uses Byte Buddy via reflection to modify .class files at runtime, automatically discovering all public "
+            "methods in the delegate class and adding them to the target class through method delegation."
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "GitFolderDownloader",
+            "script_name": "ClassMethodAdder",
             "usage": (
-                "java GitFolderDownloader --name PythonStuff\n"
-                "java GitFolderDownloader --name SomeOtherFolder"
+                "java ClassMethodAdder --classNameToModify MyService --delegateclass PaymentLogic\n"
+                "java ClassMethodAdder --classNameToModify UserService --delegateclass LoggerLogic"
             ),
             "description": (
-                "Downloads all files from a GitHub repository folder, moves them to the current directory, "
-                "removes the downloaded folder, and initializes a Python virtual environment to run scripts. "
-                "Supports default folder fallback and verbose CLI output."
+                "Enhances any .class file by adding methods from a delegate class. Automatically discovers "
+                "method signatures and uses Byte Buddy's MethodDelegation. Preserves original functionality "
+                "while adding new methods dynamically. No classpath configuration needed."
             )
         }
     }
 ]
-
-
-
 
 
 
