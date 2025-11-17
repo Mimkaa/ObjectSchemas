@@ -37,20 +37,15 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "A Java utility that dynamically adds methods from any delegate class to existing compiled Java classes. "
-            "It uses Byte Buddy via reflection to modify .class files at runtime, automatically discovering all public "
-            "methods in the delegate class and adding them to the target class through method delegation."
+            "creates a delegate using ai from the Spec file"
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "ClassMethodAdder",
+            "script_name": "OpenAiDelegateGenerator",
             "usage": (
-                "java ClassMethodAdder --classNameToModify MyService --delegateclass PaymentLogic\n"
-                "java ClassMethodAdder --classNameToModify UserService --delegateclass LoggerLogic"
+                "java OpenAiDelegateGenerator <Target_spec.json>"
             ),
             "description": (
-                "Enhances any .class file by adding methods from a delegate class. Automatically discovers "
-                "method signatures and uses Byte Buddy's MethodDelegation. Preserves original functionality "
-                "while adding new methods dynamically. No classpath configuration needed."
+                "creates a delegate using ai from the Spec file"
             )
         }
     }
