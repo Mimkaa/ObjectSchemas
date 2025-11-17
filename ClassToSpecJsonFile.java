@@ -39,41 +39,8 @@ public class ClassToSpecJsonFile {
         List<FieldInfo> fields = extractFields(target, a.includePrivate);
         List<MethodInfo> methods = extractMethods(target, a.includePrivate);
 
-        // ---- Parse method specs (keep detailed entries to know provided names) ----
-        List<MethodSpec> providedSpecs = parseMethodSpecsDetailed(a.methodSpecs);
-
-        // ---- Attach logic specs to EXISTING methods (match by full signature first, then by name) ----
-        Set<String> existingNames = new HashSet<>();
-        for (MethodInfo mi : methods) existingNames.add(mi.name);
-
-        for (MethodInfo mi : methods) {
-            String keySig = mi.signatureForMatch();
-            // find best matching provided spec
-            MethodSpec match = null;
-            for (MethodSpec ms : providedSpecs) {
-                if (ms.signature != null && ms.signature.equals(keySig)) { match = ms; break; }
-            }
-            if (match == null) {
-                for (MethodSpec ms : providedSpecs) {
-                    if (ms.name != null && ms.name.equals(mi.name)) { match = ms; break; }
-                }
-            }
-            if (match != null) {
-                mi.logicSpec = match.logic;
-            }
-        }
-
-        // ---- Collect NON-EXISTING method specs into top-level "newMethodLogicSpec" ----
-        Map<String,String> newMethodLogicSpec = new LinkedHashMap<>();
-        for (MethodSpec ms : providedSpecs) {
-            // if the given method name is not present among existing methods, record it as "planned"
-            if (ms.name != null && !existingNames.contains(ms.name)) {
-                newMethodLogicSpec.put(ms.name, ms.logic);
-            }
-        }
-
         // ---- Build JSON and write ----
-        String json = toJson(fqn, fields, methods, newMethodLogicSpec);
+        String json = toJson(fqn, fields, methods);
         Path out = (a.outPath == null)
                 ? classFile.getParent().resolve(simple(fqn) + "_spec.json")
                 : Paths.get(a.outPath);
@@ -87,7 +54,6 @@ public class ClassToSpecJsonFile {
         String fqn;               // optional (auto-inferred)
         String outPath;           // optional
         boolean includePrivate = true;
-        List<String> methodSpecs = new ArrayList<>(); // optional: "<signature>; // logic"
 
         static Args parse(String[] av) {
             Args a = new Args();
@@ -97,7 +63,6 @@ public class ClassToSpecJsonFile {
                     case "--fqn"        -> { if (i+1 < av.length) a.fqn = av[++i]; }
                     case "--out"        -> { if (i+1 < av.length) a.outPath = av[++i]; }
                     case "--publicOnly" -> a.includePrivate = false;
-                    case "--methodSpec" -> { if (i+1 < av.length) a.methodSpecs.add(av[++i]); }
                 }
             }
             return a;
@@ -108,19 +73,14 @@ public class ClassToSpecJsonFile {
                 ClassToSpecJsonFile - read a .class from disk and emit a JSON spec.
                 - Auto-detects FQN from the .class file when --fqn is omitted
                 - No external JSON libs required
-                - NEW: records non-existing methods under top-level "newMethodLogicSpec"
 
                 Usage:
                   java ClassToSpecJsonFile --targetFile <path/to/Model.class> [--fqn com.example.Model]
                                            [--out model_spec.json] [--publicOnly]
-                                           [--methodSpec "<signature>; // <logic>"] ...
 
                 Examples:
                   java ClassToSpecJsonFile --targetFile ./com/example/Model.class
-                  java ClassToSpecJsonFile --targetFile ./Model.class \
-                    --methodSpec "sayHello; // Return 'Hello, ' + this.name"
-                  java ClassToSpecJsonFile --targetFile ./Model.class \
-                    --methodSpec "incrementNumbers; // Loop over numbers and add 1"
+                  java ClassToSpecJsonFile --targetFile ./Model.class --out Dori_spec.json
                 """);
         }
     }
@@ -137,15 +97,15 @@ public class ClassToSpecJsonFile {
                 int tag = in.readUnsignedByte();
                 switch (tag) {
                     case 1: cp[i] = in.readUTF(); break;            // Utf8
-                    case 3: case 4: in.readInt(); break;            // int/float
-                    case 5: case 6: in.readLong(); i++; break;      // long/double (2 slots)
-                    case 7: case 8: cp[i] = in.readUnsignedShort(); break; // Class/String (index)
-                    case 9: case 10: case 11: case 12:
+                    case 3, 4: in.readInt(); break;                 // int/float
+                    case 5, 6: in.readLong(); i++; break;           // long/double (2 slots)
+                    case 7, 8: cp[i] = in.readUnsignedShort(); break; // Class/String (index)
+                    case 9, 10, 11, 12:
                         in.readUnsignedShort(); in.readUnsignedShort(); break;
                     case 15: in.readUnsignedByte(); in.readUnsignedShort(); break;
                     case 16: in.readUnsignedShort(); break;
                     case 18: in.readUnsignedShort(); in.readUnsignedShort(); break;
-                    case 19: case 20: in.readUnsignedShort(); break;
+                    case 19, 20: in.readUnsignedShort(); break;
                     default: throw new IOException("Unknown CP tag: " + tag);
                 }
             }
@@ -191,20 +151,6 @@ public class ClassToSpecJsonFile {
         List<Param> parameters = new ArrayList<>();
         List<String> throwsTypes = new ArrayList<>();
         List<String> modifiers = new ArrayList<>();
-        String logicSpec;          // optional
-
-        String signatureForMatch() {
-            StringBuilder sb = new StringBuilder();
-            sb.append(modifiersString(modifiers)).append(" ");
-            sb.append(returnType).append(" ");
-            sb.append(name).append("(");
-            for (int i = 0; i < parameters.size(); i++) {
-                if (i > 0) sb.append(",");
-                sb.append(parameters.get(i).type);
-            }
-            sb.append(")");
-            return sb.toString().trim();
-        }
 
         String toJson() {
             StringBuilder sb = new StringBuilder();
@@ -217,9 +163,8 @@ public class ClassToSpecJsonFile {
             }
             sb.append("]")
               .append(",\"throws\":").append(listJson(throwsTypes))
-              .append(",\"modifiers\":").append(listJson(modifiers));
-            if (logicSpec != null) sb.append(",\"logicSpec\":").append(js(logicSpec));
-            sb.append("}");
+              .append(",\"modifiers\":").append(listJson(modifiers))
+              .append("}");
             return sb.toString();
         }
     }
@@ -230,13 +175,6 @@ public class ClassToSpecJsonFile {
         String toJson() {
             return "{\"name\":" + js(name) + ",\"type\":" + js(type) + "}";
         }
-    }
-
-    // For capturing exactly what the user provided via --methodSpec
-    static final class MethodSpec {
-        String signature; // normalized signature text (optional)
-        String name;      // method name derived from signature (required to index planned specs)
-        String logic;     // user's description
     }
 
     // ---------- Extraction ----------
@@ -278,8 +216,7 @@ public class ClassToSpecJsonFile {
     }
 
     // ---------- JSON builder ----------
-    static String toJson(String target, List<FieldInfo> fields, List<MethodInfo> methods,
-                         Map<String,String> newMethodLogicSpec) {
+    static String toJson(String target, List<FieldInfo> fields, List<MethodInfo> methods) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         sb.append("  \"target\": ").append(js(target)).append(",\n");
@@ -296,19 +233,9 @@ public class ClassToSpecJsonFile {
             if (i > 0) sb.append(",");
             sb.append(methods.get(i).toJson());
         }
-        sb.append("]");
+        sb.append("]\n");
 
-        if (newMethodLogicSpec != null && !newMethodLogicSpec.isEmpty()) {
-            sb.append(",\n  \"newMethodLogicSpec\": {");
-            int k = 0;
-            for (Map.Entry<String,String> e : newMethodLogicSpec.entrySet()) {
-                if (k++ > 0) sb.append(",");
-                sb.append("\n    ").append(js(e.getKey())).append(": ").append(js(e.getValue()));
-            }
-            sb.append("\n  }");
-        }
-
-        sb.append("\n}\n");
+        sb.append("}\n");
         return sb.toString();
     }
 
@@ -354,43 +281,5 @@ public class ClassToSpecJsonFile {
 
     static String simpleFromFileName(String file) {
         return file.endsWith(".class") ? file.substring(0, file.length()-6) : file;
-    }
-
-    static String modifiersString(List<String> mods) {
-        return String.join(" ", mods);
-    }
-
-    // Parse method specs, keeping both signature and derived name so we can:
-    //  - match existing methods by signature or by name
-    //  - record non-existing ones by name into "newMethodLogicSpec"
-    static List<MethodSpec> parseMethodSpecsDetailed(List<String> specs) {
-        List<MethodSpec> out = new ArrayList<>();
-        for (String s : specs) {
-            String[] parts = s.split("//", 2);
-            String sig = parts[0].trim();
-            String logic = (parts.length > 1 ? parts[1].trim() : "");
-            if (sig.endsWith(";")) sig = sig.substring(0, sig.length()-1).trim();
-
-            MethodSpec ms = new MethodSpec();
-            ms.signature = sig.isEmpty() ? null : sig;
-            ms.logic = logic.isEmpty() ? "(no logic provided)" : logic;
-
-            // Derive a method name from the signature or token:
-            // Accept plain "methodName" OR "mods returnType methodName(...)" forms.
-            String name = null;
-            int p = sig.indexOf('(');
-            if (p > 0) {
-                String left = sig.substring(0, p).trim(); // e.g., "public void incrementNumbers"
-                String[] tokens = left.split("\\s+");
-                name = tokens.length > 0 ? tokens[tokens.length-1] : null;
-            } else {
-                // maybe user passed just the name
-                name = sig;
-            }
-            ms.name = name;
-
-            out.add(ms);
-        }
-        return out;
     }
 }

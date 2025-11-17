@@ -37,15 +37,15 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "creates a delegate using ai from the Spec file"
+            "adds logic to a spec file from a text file"
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
-            "script_name": "OpenAiDelegateGenerator",
+            "script_name": "SpecMethodLogicAppender",
             "usage": (
-                "java OpenAiDelegateGenerator <Target_spec.json>"
+                "java SpecMethodLogicAppender --specFile <YourSpecFile.json> --logicFile <YourLogicFile.txt>"
             ),
             "description": (
-                "creates a delegate using ai from the Spec file"
+                "adds logic to a spec file from a text file"
             )
         }
     }
