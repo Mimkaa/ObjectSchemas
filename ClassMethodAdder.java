@@ -8,7 +8,10 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 
@@ -19,10 +22,24 @@ import java.util.stream.Collectors;
  * No -cp needed for Byte Buddy: this tool loads byte-buddy-*.jar from the current directory.
  *
  * Recommended JDK to run this tool: JDK 17 or JDK 21.
+ *
+ * Usage:
+ *   java ClassMethodAdder --classNameToModify <FullyQualifiedClassName> --delegateclass <FullyQualifiedDelegateClassName>
+ *
+ * Example:
+ *   java ClassMethodAdder --classNameToModify Base --delegateclass BaseDelegate
+ *
+ * Requirements:
+ *   - byte-buddy-*.jar in the same directory
+ *   - <ClassNameToModify>.class in the current directory (or subfolders matching its package)
+ *   - Delegate class available on the default classpath
  */
 public class ClassMethodAdder {
 
     public static void main(String[] args) {
+        // ✅ ensure Byte Buddy allows newer classfile versions if present
+        System.setProperty("net.bytebuddy.experimental", "true");
+
         if (args.length != 4) {
             printUsage();
             return;
@@ -53,12 +70,13 @@ public class ClassMethodAdder {
     }
 
     public void addAllMethods(String classNameToModify, String delegateClassName) throws Exception {
+        // For FQN like "com.example.Base" we expect "com/example/Base.class" relative to cwd
         Path inputClassFile = Path.of(classNameToModify.replace('.', '/') + ".class");
         if (!Files.exists(inputClassFile)) {
             throw new IllegalStateException("Class file not found: " + inputClassFile);
         }
 
-        System.out.println(">>> Target class: " + classNameToModify);
+        System.out.println(">>> Target class:   " + classNameToModify);
         System.out.println(">>> Delegate class: " + delegateClassName);
 
         // Load delegate class (metadata only)
@@ -67,13 +85,15 @@ public class ClassMethodAdder {
         // If there are instance methods, we will need a no-arg ctor
         Constructor<?> delegateNoArgCtor = null;
         for (Method mm : delegateClass.getDeclaredMethods()) {
-            if (Modifier.isPublic(mm.getModifiers()) && !Modifier.isStatic(mm.getModifiers())
+            int mods = mm.getModifiers();
+            if (Modifier.isPublic(mods)
+                    && !Modifier.isStatic(mods)
                     && mm.getDeclaringClass() == delegateClass) {
                 try {
                     delegateNoArgCtor = delegateClass.getDeclaredConstructor();
                     delegateNoArgCtor.setAccessible(true);
                 } catch (NoSuchMethodException e) {
-                    // handled later with a clear message
+                    // handled later with a clear message if needed
                 }
                 break;
             }
@@ -83,7 +103,11 @@ public class ClassMethodAdder {
         File[] bbJars = findValidByteBuddyJars();
         URL[] jarUrls = Arrays.stream(bbJars)
                 .map(f -> {
-                    try { return f.toURI().toURL(); } catch (Exception e) { throw new RuntimeException(e); }
+                    try {
+                        return f.toURI().toURL();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
                 })
                 .toArray(URL[]::new);
 
@@ -142,7 +166,7 @@ public class ClassMethodAdder {
             Object targetType = resolve.invoke(resolution);
 
             // Existing method signatures (name + descriptor)
-            Set<String> existing = new HashSet<>();
+            Set<String> existing = new HashSet<String>();
             Method getDeclaredMethods = TypeDescription.getMethod("getDeclaredMethods");
             Object methodList = getDeclaredMethods.invoke(targetType);
             Method toArray = methodList.getClass().getMethod("toArray", Object[].class);
@@ -215,7 +239,9 @@ public class ClassMethodAdder {
                     try {
                         Method withAllArgs = methodCall.getClass().getMethod("withAllArguments");
                         methodCall = withAllArgs.invoke(methodCall);
-                    } catch (NoSuchMethodException ignored) { }
+                    } catch (NoSuchMethodException ignored) {
+                        // older/newer Byte Buddy variant
+                    }
                     impl = methodCall;
                     System.out.println("  [INFO] static -> MethodCall.invoke");
                 } else {
@@ -233,7 +259,9 @@ public class ClassMethodAdder {
                     try {
                         Method withAllArgs = bound.getClass().getMethod("withAllArguments");
                         bound = withAllArgs.invoke(bound);
-                    } catch (NoSuchMethodException ignored) { }
+                    } catch (NoSuchMethodException ignored) {
+                        // older/newer Byte Buddy variant
+                    }
                     impl = bound;
                     System.out.println("  [INFO] instance -> MethodCall.invoke(...).onMethodCall(construct(...))");
                 }
@@ -330,16 +358,17 @@ public class ClassMethodAdder {
     public static File[] findValidByteBuddyJars() throws IOException {
         File dir = new File(".");
         File[] all = dir.listFiles((d, name) ->
-                name.endsWith(".jar") &&
-                        name.startsWith("byte-buddy") &&
-                        !name.contains("sources") &&
-                        !name.contains("javadoc"));
+                name.endsWith(".jar")
+                        && name.startsWith("byte-buddy")
+                        && !name.contains("sources")
+                        && !name.contains("javadoc"));
 
         if (all == null || all.length == 0) {
             throw new IllegalStateException("ERROR: No byte-buddy*.jar found in current directory!");
         }
 
-        File core = null, agent = null;
+        File core = null;
+        File agent = null;
 
         for (File f : all) {
             String n = f.getName();
@@ -378,11 +407,17 @@ public class ClassMethodAdder {
         System.out.println("ClassMethodAdder - Add all public methods from delegate to an existing class");
         System.out.println();
         System.out.println("Usage:");
-        System.out.println("  java ClassMethodAdder --classNameToModify <FQN> --delegateclass <FQN>");
+        System.out.println("  java ClassMethodAdder --classNameToModify <FullyQualifiedClassName> "
+                + "--delegateclass <FullyQualifiedDelegateClassName>");
+        System.out.println();
+        System.out.println("Examples:");
+        System.out.println("  java ClassMethodAdder --classNameToModify Base --delegateclass BaseDelegate");
+        System.out.println("  java ClassMethodAdder --classNameToModify com.example.Base "
+                + "--delegateclass com.example.BaseDelegate");
         System.out.println();
         System.out.println("Requirements:");
         System.out.println("  - byte-buddy-*.jar must be in the same directory");
-        System.out.println("  - <ClassName>.class must be in the current directory");
+        System.out.println("  - <ClassNameToModify>.class must be in the current directory (or matching package folders)");
         System.out.println("  - Delegate class must be on the default classpath");
     }
 }
