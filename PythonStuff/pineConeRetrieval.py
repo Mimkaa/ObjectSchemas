@@ -16,6 +16,7 @@ class ScriptRetriever:
         self.script_name = None
         self.prompt = None
         self.usage = None
+        self.description = ""   # ✅ NEW
 
     def _save_to_file(self, file_path: str, content: str):
         try:
@@ -28,13 +29,21 @@ class ScriptRetriever:
             return False
 
     def _update_last_loaded_script(self):
-        """Update LastLoadedScript.txt with the chosen script info."""
+        """Update LastLoadedScript.txt with script name, prompt, usage, description."""
         if not all([self.script_name, self.prompt]):
             print("❌ Cannot update LastLoadedScript.txt: script_name or prompt missing.")
             return False
 
         last_loaded_path = os.path.join(os.getcwd(), "LastLoadedScript.txt")
-        content = f"{self.script_name}\n{self.prompt}\n{self.usage or ''}\n"
+
+        # Always output 4 lines
+        content = (
+            f"{self.script_name}\n"
+            f"{self.prompt}\n"
+            f"{self.usage or ''}\n"
+            f"{self.description or ''}\n"  # ✅ NEW
+        )
+
         return self._save_to_file(last_loaded_path, content)
 
     def _download_script(self, script_name: str):
@@ -52,7 +61,7 @@ class ScriptRetriever:
         return None, None
 
     def retrieve(self, prompt: str):
-        """Retrieve the best matching script for the given prompt using GPT evaluation."""
+        """Retrieve the best matching script for the given prompt using GPT."""
         print(f"🧠 Retrieving top 3 scripts for prompt: {prompt}")
         self.prompt = prompt
 
@@ -63,7 +72,7 @@ class ScriptRetriever:
         )
         query_vector = response.data[0].embedding
 
-        # --- Query Pinecone for top 3 matches ---
+        # --- Query Pinecone ---
         results = self.index.query(
             vector=query_vector,
             top_k=3,
@@ -78,13 +87,17 @@ class ScriptRetriever:
         for match in results.matches:
             script_name = match.metadata.get("script_name")
             usage = match.metadata.get("usage", "")
+            description = match.metadata.get("description", "")  # ✅ NEW
+
             if not script_name:
                 continue
+
             file_path, content = self._download_script(script_name)
             if file_path:
                 scripts_info.append({
                     "script_name": script_name,
                     "usage": usage,
+                    "description": description,  # ✅ new
                     "file_path": file_path,
                     "content": content
                 })
@@ -93,12 +106,20 @@ class ScriptRetriever:
             print("❌ No scripts could be downloaded.")
             return None
 
-        # --- Ask GPT to choose the best script ---
-        gpt_prompt = "You are a helpful assistant. Given the user's request and descriptions of 3 Java scripts, choose the one that best fits the prompt.\n\n"
-        gpt_prompt += f"User prompt:\n{prompt}\n\n"
-        gpt_prompt += "Scripts descriptions:\n"
+        # --- Ask GPT to choose best script ---
+        gpt_prompt = (
+            "You are a helpful assistant. Given the user's request and descriptions of 3 Java scripts, "
+            "choose the one that best fits the prompt.\n\n"
+            f"User prompt:\n{prompt}\n\n"
+            "Scripts descriptions:\n"
+        )
+
         for i, script in enumerate(scripts_info, 1):
-            gpt_prompt += f"{i}. Name: {script['script_name']}, Description/Usage: {script['usage']}\n"
+            gpt_prompt += (
+                f"{i}. Name: {script['script_name']}\n"
+                f"   Usage: {script['usage']}\n"
+                f"   Description: {script['description']}\n"
+            )
 
         gpt_prompt += "\nReply with the number of the best script choice."
 
@@ -112,7 +133,7 @@ class ScriptRetriever:
             choice_index = int(choice_text) - 1
         except Exception as e:
             print(f"❌ GPT evaluation failed: {e}")
-            choice_index = 0  # fallback to first script
+            choice_index = 0  # fallback
 
         if choice_index < 0 or choice_index >= len(scripts_info):
             choice_index = 0
@@ -120,8 +141,9 @@ class ScriptRetriever:
         chosen_script = scripts_info[choice_index]
         self.script_name = chosen_script["script_name"]
         self.usage = chosen_script["usage"]
+        self.description = chosen_script["description"] or ""  # ✅ NEW
 
-        # --- Update LastLoadedScript.txt ---
+        # --- Save LastLoadedScript.txt (now with description) ---
         if not self._update_last_loaded_script():
             return None
 
@@ -130,7 +152,7 @@ class ScriptRetriever:
 
     def run(self):
         if not self.prompt:
-            print("❌ Cannot run: prompt not set. Please set retriever.prompt first.")
+            print("❌ Cannot run: prompt not set.")
             return False
 
         print(f"🚀 Running retriever for prompt: {self.prompt}")

@@ -13,13 +13,22 @@ class JavaScriptRunner:
         self.param_file = None
         self.prompt = ""
         self.usage = ""
+        self.description = ""  # ✅ new
         self.script_dir = ""
 
     # ---------------------------------------------------------------
     # Load info from LastLoadedScript.txt
     # ---------------------------------------------------------------
     def load_last_script(self, last_loaded_file: str = "LastLoadedScript.txt"):
-        """Load last downloaded script info from LastLoadedScript.txt"""
+        """
+        Load last downloaded script info from LastLoadedScript.txt
+
+        Expected format (one line each):
+        1) script_name
+        2) prompt
+        3) usage
+        4) description   (optional but preferred; written by ScriptRetriever)
+        """
         path = os.path.join(os.getcwd(), last_loaded_file)
         if not os.path.exists(path):
             raise FileNotFoundError(f"{last_loaded_file} not found.")
@@ -30,7 +39,12 @@ class JavaScriptRunner:
         if len(lines) < 3:
             raise ValueError(f"{last_loaded_file} needs at least 3 lines (script name, prompt, usage).")
 
-        self.script_name, self.prompt, self.usage = lines[0], lines[1], lines[2]
+        self.script_name = lines[0]
+        self.prompt = lines[1]
+        self.usage = lines[2]
+        if len(lines) >= 4:
+            self.description = lines[3]
+
         self.script_dir = os.getcwd()
         self.script_path = os.path.join(self.script_dir, f"{self.script_name}.java")
         self.param_file = os.path.join(self.script_dir, f"{self.script_name}_params_to_adjust.json")
@@ -38,10 +52,14 @@ class JavaScriptRunner:
         if not os.path.exists(self.script_path):
             raise FileNotFoundError(f"{self.script_name}.java not found in current folder.")
 
+        print(f"📄 Loaded script info:")
+        print(f"  Script: {self.script_name}")
+        print(f"  Prompt: {self.prompt}")
+        print(f"  Usage : {self.usage}")
+        if self.description:
+            print(f"  Desc  : {self.description}")
+
     # ---------------------------------------------------------------
-    # Parameter extraction (GPT)
-    # ---------------------------------------------------------------
-        # ---------------------------------------------------------------
     # Parameter extraction (GPT)
     # ---------------------------------------------------------------
     def extract_parameters(self):
@@ -69,7 +87,10 @@ class JavaScriptRunner:
           "library": "org.json:json:20210307"
         }}
 
-        Now analyze:
+        Now analyze this script:
+
+        Script name: {self.script_name}
+        Description: {self.description}
         Original user prompt: {self.prompt}
         Script usage: {self.usage}
         """
@@ -79,7 +100,14 @@ class JavaScriptRunner:
                 model="gpt-4o-mini",
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": "You are a precise and grounded Java CLI parameter inference engine. Never guess or invent new parameters."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a precise and grounded Java CLI parameter inference engine. "
+                            "Never guess or invent new parameter names. Only return parameters that "
+                            "are clearly justified by the usage string or the prompt."
+                        )
+                    },
                     {"role": "user", "content": gpt_prompt}
                 ],
                 temperature=0
@@ -90,11 +118,11 @@ class JavaScriptRunner:
             print(f"⚠️ GPT parameter extraction failed: {e}")
             data = {}
 
-        # 🧹 Flatten if GPT still nests
-        if "parameters" in data and isinstance(data["parameters"], dict):
+        # 🧹 Flatten if GPT still nests "parameters"
+        if isinstance(data, dict) and "parameters" in data and isinstance(data["parameters"], dict):
             self.params = data["parameters"]
         else:
-            self.params = data
+            self.params = data if isinstance(data, dict) else {}
 
         if self.params:
             print("\n🧠 Detected parameters:")
@@ -104,23 +132,22 @@ class JavaScriptRunner:
             print("⚙️ No parameters inferred; running without arguments.")
             self.params = {}
 
-
-
     # ---------------------------------------------------------------
-    # Save extracted parameters to JSON (includes original prompt)
+    # Save extracted parameters to JSON (includes original prompt + description)
     # ---------------------------------------------------------------
     def save_parameters_to_json(self):
-        """Save extracted parameters and metadata — including the original user prompt — to a JSON file."""
+        """Save extracted parameters and metadata — including the original user prompt & description — to a JSON file."""
         data = {
             "script_name": self.script_name,
-            "prompt": self.prompt,   # ✅ added here
+            "description": self.description,  # ✅ included
+            "prompt": self.prompt,
             "usage": self.usage,
             "parameters": self.params
         }
         try:
             with open(self.param_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-            print(f"\n💾 Saved parameters (with prompt) to {self.param_file}")
+            print(f"\n💾 Saved parameters (with prompt & description) to {self.param_file}")
         except Exception as e:
             print(f"❌ Failed to save parameters JSON: {e}")
 
@@ -134,15 +161,19 @@ class JavaScriptRunner:
         self.save_parameters_to_json()
         print(self.params)
         print("✅ Parameter extraction complete (no execution).")
-	
+
     def run(self):
+        """Convenience: just run the extraction-only pipeline."""
         self.extract_parameters_only()
 
     # ---------------------------------------------------------------
     # Full pipeline (optional legacy)
     # ---------------------------------------------------------------
     def run_last_script(self):
-        """Full pipeline (for legacy use): load last script → extract → build args → compile & run."""
+        """
+        Full pipeline (for legacy use):
+        load last script → extract → save params JSON → compile & run Java.
+        """
         try:
             self.load_last_script()
             self.extract_parameters()
@@ -152,7 +183,7 @@ class JavaScriptRunner:
             print(f"❌ Error while running last script: {e}")
 
     # ---------------------------------------------------------------
-    # Compile and run (same as before)
+    # Compile and run
     # ---------------------------------------------------------------
     def compile_and_run(self):
         """Compile and run the Java script using inferred parameters."""
@@ -171,7 +202,7 @@ class JavaScriptRunner:
 
         print("✅ Compilation successful.")
 
-        # Build CLI args
+        # Build CLI args from params dict
         args = []
         for k, v in self.params.items():
             if v:

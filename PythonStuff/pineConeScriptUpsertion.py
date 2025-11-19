@@ -37,15 +37,15 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "adds logic to a spec file from a text file"
+            "this script adds the logic from the of a method writen in a text file to an existing spec file "
         )[:MAX_DESCRIPTION_LENGTH],
         "metadata": {
             "script_name": "SpecMethodLogicAppender",
             "usage": (
-                "java SpecMethodLogicAppender --specFile <YourSpecFile.json> --logicFile <YourLogicFile.txt>"
+                "java SpecMethodLogicAppender --specFile <SpecFileName.json> `--logicFile <ATXTFileWithMethodLogic.txt>"
             ),
             "description": (
-                "adds logic to a spec file from a text file"
+                "this script adds the logic from the of a method writen in a text file to an existing spec file"
             )
         }
     }

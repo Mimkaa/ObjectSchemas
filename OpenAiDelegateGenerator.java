@@ -11,14 +11,16 @@ import java.nio.file.Paths;
 /**
  * Command-line tool:
  *
- *   java OpenAiDelegateGenerator Dori_spec.json
+ *   java OpenAiDelegateGenerator Loco_spec.json
+ *   or
+ *   java OpenAiDelegateGenerator --Target_spec Loco_spec.json
  *
  * Requires:
  *   - Java 11+
  *   - Environment variable OPENAI_API_KEY set
  *
  * Effect:
- *   - Reads Dori_spec.json
+ *   - Reads <Target>_spec.json
  *   - Asks OpenAI to generate a delegate class
  *   - Writes <TargetSimpleName>Delegate.java in the same directory
  *   - Then compiles it to <TargetSimpleName>Delegate.class via javac
@@ -75,15 +77,36 @@ public class OpenAiDelegateGenerator {
     }
 
     // ------------------------------------------------------------
-    // main: accepts exactly one parameter: the .json spec path
+    // main: accepts either positional spec.json or --Target_spec <file>
     // ------------------------------------------------------------
     public static void main(String[] args) {
-        if (args.length != 1) {
-            System.err.println("Usage: java OpenAiDelegateGenerator <spec.json>");
+        String specFile = null;
+
+        if (args.length == 1 && !args[0].startsWith("--")) {
+            // Positional form: java OpenAiDelegateGenerator Loco_spec.json
+            specFile = args[0];
+        } else {
+            // Flag form: java OpenAiDelegateGenerator --Target_spec Loco_spec.json
+            for (int i = 0; i < args.length; i++) {
+                String arg = args[i];
+                if ("--Target_spec".equals(arg) && i + 1 < args.length) {
+                    specFile = args[++i];
+                    break;
+                }
+            }
+        }
+
+        if (specFile == null) {
+            System.err.println("""
+                Usage:
+                  java OpenAiDelegateGenerator <spec.json>
+                  or
+                  java OpenAiDelegateGenerator --Target_spec <spec.json>
+                """);
             System.exit(1);
         }
 
-        Path specPath = Paths.get(args[0]);
+        Path specPath = Paths.get(specFile);
 
         try {
             OpenAiDelegateGenerator gen = new OpenAiDelegateGenerator();
@@ -277,15 +300,6 @@ public class OpenAiDelegateGenerator {
         return sb.toString();
     }
 
-    /**
-     * Build the prompt:
-     * - "fields" and "methods" from the spec describe the EXISTING class.
-     * - "newMethodLogicSpec" tells which NEW methods to create (for injection).
-     * - Generated methods are written AS IF they will live inside the original class,
-     *   so they MAY read and write existing fields (this.age = 42; etc.).
-     * - The generated class MUST extend the target simple name, so accessing
-     *   fields like this.age compiles.
-     */
     private String buildUserPrompt(String delegateClassName,
                                    String targetSimpleName,
                                    String specJson) {
@@ -375,12 +389,6 @@ public class OpenAiDelegateGenerator {
             ------------------------
             - For each key in "newMethodLogicSpec", create exactly ONE NEW instance method
               whose name is that key.
-              Example:
-                "newMethodLogicSpec": {
-                  "incrementNumbers": "Loop over numbers and add 1 to each"
-                }
-              -> You must define:
-                   public <someReturnType> incrementNumbers(<someParameters>) { ... }
 
             GENERAL SEMANTICS
             -----------------
