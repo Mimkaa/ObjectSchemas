@@ -53,7 +53,11 @@ public class DynamicClassCreator {
     }
 
     /**
-     * Creates a dynamic class with a private field 'name' and a public 'sayHello' method.
+     * Creates a dynamic class with:
+     *   - private String name;
+     *   - public String sayHello();
+     *   - public static void main(String[] args);
+     *
      * Returns the generated class bytes.
      */
     public byte[] createDynamicClass(String className) throws Exception {
@@ -64,14 +68,13 @@ public class DynamicClassCreator {
         URL jarUrl = byteBuddyJar.toURI().toURL();
         try (URLClassLoader loader = new URLClassLoader(new URL[]{jarUrl}, getClass().getClassLoader())) {
 
-            Class<?> byteBuddyClass = Class.forName("net.bytebuddy.ByteBuddy", true, loader);
-            Class<?> fixedValueClass = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
-            Class<?> implementationClass = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
-            Class<?> dynamicTypeClass = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
-            
-            // Load TypeDefinition and TypeDescription classes
-            Class<?> typeDefinitionClass = Class.forName("net.bytebuddy.description.type.TypeDefinition", true, loader);
-            Class<?> typeForLoadedTypeClass = Class.forName("net.bytebuddy.description.type.TypeDescription$ForLoadedType", true, loader);
+            Class<?> byteBuddyClass        = Class.forName("net.bytebuddy.ByteBuddy", true, loader);
+            Class<?> fixedValueClass       = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
+            Class<?> implementationClass   = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
+            Class<?> dynamicTypeClass      = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
+            Class<?> typeDefinitionClass   = Class.forName("net.bytebuddy.description.type.TypeDefinition", true, loader);
+            Class<?> typeForLoadedTypeClass= Class.forName("net.bytebuddy.description.type.TypeDescription$ForLoadedType", true, loader);
+            Class<?> stubMethodClass       = Class.forName("net.bytebuddy.implementation.StubMethod", true, loader);
 
             Object byteBuddy = byteBuddyClass.getDeclaredConstructor().newInstance();
 
@@ -83,31 +86,42 @@ public class DynamicClassCreator {
             Method nameMethod = findMethodRecursive(builder, "name", String.class);
             builder = nameMethod.invoke(builder, className);
 
-            // Define private field 'name' - try different signatures
+            // ------------------------------------------------------------------
+            // Define private field 'name'
+            // ------------------------------------------------------------------
             try {
                 // First try with TypeDefinition
-                Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, typeDefinitionClass, int.class);
-                Object stringTypeDefinition = typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
+                Method defineFieldMethod = findMethodRecursive(builder, "defineField",
+                        String.class, typeDefinitionClass, int.class);
+                Object stringTypeDefinition =
+                        typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
                 builder = defineFieldMethod.invoke(builder, "name", stringTypeDefinition, Modifier.PRIVATE);
                 System.out.println("✅ Defined field 'name' with TypeDefinition");
             } catch (NoSuchMethodException e) {
                 // Fallback to Class
-                Method defineFieldMethod = findMethodRecursive(builder, "defineField", String.class, Class.class, int.class);
+                Method defineFieldMethod = findMethodRecursive(builder, "defineField",
+                        String.class, Class.class, int.class);
                 builder = defineFieldMethod.invoke(builder, "name", String.class, Modifier.PRIVATE);
                 System.out.println("✅ Defined field 'name' with Class");
             }
 
-            // Define public method 'sayHello' returning String - try different signatures
+            // ------------------------------------------------------------------
+            // Define public String sayHello()
+            // ------------------------------------------------------------------
             Object methodBuilder;
+
             try {
                 // First try with TypeDefinition
-                Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, typeDefinitionClass, int.class);
-                Object stringTypeDefinition = typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
+                Method defineMethod = findMethodRecursive(builder, "defineMethod",
+                        String.class, typeDefinitionClass, int.class);
+                Object stringTypeDefinition =
+                        typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(String.class);
                 methodBuilder = defineMethod.invoke(builder, "sayHello", stringTypeDefinition, Modifier.PUBLIC);
                 System.out.println("✅ Defined method 'sayHello' with TypeDefinition");
             } catch (NoSuchMethodException e) {
                 // Fallback to Class
-                Method defineMethod = findMethodRecursive(builder, "defineMethod", String.class, Class.class, int.class);
+                Method defineMethod = findMethodRecursive(builder, "defineMethod",
+                        String.class, Class.class, int.class);
                 methodBuilder = defineMethod.invoke(builder, "sayHello", String.class, Modifier.PUBLIC);
                 System.out.println("✅ Defined method 'sayHello' with Class");
             }
@@ -116,15 +130,69 @@ public class DynamicClassCreator {
             Method valueMethod = findStaticMethod(fixedValueClass, "value", Object.class);
             Object fixedValueInstance = valueMethod.invoke(null, "Hello from " + className + "!");
 
-            // Intercept method
+            // Intercept sayHello()
             Method interceptMethod = findMethodRecursive(methodBuilder, "intercept", implementationClass);
-            Object interceptedBuilder = interceptMethod.invoke(methodBuilder, fixedValueInstance);
+            builder = interceptMethod.invoke(methodBuilder, fixedValueInstance);
 
-            // Build class
-            Method makeMethod = findMethodRecursive(interceptedBuilder, "make");
-            Object dynamicType = makeMethod.invoke(interceptedBuilder);
+            // ------------------------------------------------------------------
+            // Define public static void main(String[] args)
+            // ------------------------------------------------------------------
+            Object mainBuilder;
 
-            // Get bytes
+            try {
+                // Try defineMethod with TypeDefinition for return type (void)
+                Method defineMethod = findMethodRecursive(builder, "defineMethod",
+                        String.class, typeDefinitionClass, int.class);
+
+                // For void, Byte Buddy normally uses a dedicated description,
+                // but many versions accept ForLoadedType(void.class) as well.
+                Object voidTypeDefinition =
+                        typeForLoadedTypeClass.getDeclaredConstructor(Class.class).newInstance(void.class);
+
+                mainBuilder = defineMethod.invoke(
+                        builder,
+                        "main",
+                        voidTypeDefinition,
+                        Modifier.PUBLIC | Modifier.STATIC
+                );
+                System.out.println("✅ Defined method 'main' with TypeDefinition");
+            } catch (NoSuchMethodException e) {
+                // Fallback to Class return type
+                Method defineMethod = findMethodRecursive(builder, "defineMethod",
+                        String.class, Class.class, int.class);
+                mainBuilder = defineMethod.invoke(
+                        builder,
+                        "main",
+                        void.class,
+                        Modifier.PUBLIC | Modifier.STATIC
+                );
+                System.out.println("✅ Defined method 'main' with Class");
+            }
+
+            // Add parameter: String[] args
+            try {
+                Method withParams = findMethodRecursive(mainBuilder, "withParameters", Class[].class);
+                mainBuilder = withParams.invoke(mainBuilder, (Object) new Class<?>[]{String[].class});
+            } catch (NoSuchMethodException e) {
+                // Some Byte Buddy versions use a List or TypeList; for a simple demo we
+                // assume Class[]. If this fails, main will be parameterless but still valid
+                System.out.println("⚠️ Failed to add parameters to main(String[] args); main() will be parameterless.");
+            }
+
+            // Implementation for main: use StubMethod.instance() -> does nothing, but valid body
+            Method stubInstanceMethod = findStaticMethod(stubMethodClass, "instance");
+            Object stubImpl = stubInstanceMethod.invoke(null);
+
+            Method interceptMain = findMethodRecursive(mainBuilder, "intercept", implementationClass);
+            builder = interceptMain.invoke(mainBuilder, stubImpl);
+            System.out.println("✅ Attached StubMethod implementation to main");
+
+            // ------------------------------------------------------------------
+            // Build class & write bytes
+            // ------------------------------------------------------------------
+            Method makeMethod = findMethodRecursive(builder, "make");
+            Object dynamicType = makeMethod.invoke(builder);
+
             Method getBytesMethod = findMethodRecursive(dynamicType, "getBytes");
             byte[] bytes = (byte[]) getBytesMethod.invoke(dynamicType);
 
@@ -136,6 +204,7 @@ public class DynamicClassCreator {
 
             System.out.println("✅ Generated class: " + className);
             System.out.println("✅ Saved to: " + classFile.toAbsolutePath());
+            System.out.println("ℹ️ You can now run:  java " + className);
 
             return bytes;
         }
