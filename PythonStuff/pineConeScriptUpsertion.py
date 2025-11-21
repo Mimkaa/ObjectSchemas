@@ -37,19 +37,30 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "this script adds the logic from the of a method writen in a text file to an existing spec file "
+            "This script replaces the implementation of selected methods in an existing compiled "
+            ".class file using method bodies from a delegate class. A mapping specifies which "
+            "method in the target should use the implementation of which method in the delegate."
         )[:MAX_DESCRIPTION_LENGTH],
+
         "metadata": {
-            "script_name": "SpecMethodLogicAppender",
+            "script_name": "ClassMethodMapper",
+
             "usage": (
-                "java SpecMethodLogicAppender --specFile <SpecFileName.json> `--logicFile <ATXTFileWithMethodLogic.txt>"
+                "java ClassMethodMapper "
+                "--classNameToModify <FullyQualifiedClassName> "
+                "--delegateclass <FullyQualifiedDelegateClassName> "
+                "--mapping <methodA:methodB,methodC:methodD>"
             ),
+
             "description": (
-                "this script adds the logic from the of a method writen in a text file to an existing spec file"
+                "This script updates the implementation of specified methods inside an existing "
+                ".class file by substituting their bytecode with the implementations of mapped "
+                "methods from a delegate class."
             )
         }
     }
 ]
+
 
 
 
