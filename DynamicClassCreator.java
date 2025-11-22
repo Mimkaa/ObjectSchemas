@@ -1,11 +1,11 @@
 import java.io.File;
 import java.io.FileOutputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -120,7 +120,6 @@ public class DynamicClassCreator {
             Class<?> byteBuddyClass         = Class.forName("net.bytebuddy.ByteBuddy", true, loader);
             Class<?> fixedValueClass        = Class.forName("net.bytebuddy.implementation.FixedValue", true, loader);
             Class<?> implementationClass    = Class.forName("net.bytebuddy.implementation.Implementation", true, loader);
-            Class<?> dynamicTypeClass       = Class.forName("net.bytebuddy.dynamic.DynamicType", true, loader);
             Class<?> typeDefinitionClass    = Class.forName("net.bytebuddy.description.type.TypeDefinition", true, loader);
             Class<?> typeForLoadedTypeClass = Class.forName("net.bytebuddy.description.type.TypeDescription$ForLoadedType", true, loader);
             Class<?> stubMethodClass        = Class.forName("net.bytebuddy.implementation.StubMethod", true, loader);
@@ -249,9 +248,20 @@ public class DynamicClassCreator {
             // Try to add parameter: String[] args using multiple variants
             mainBuilder = addStringArrayParameter(mainBuilder, loader);
 
-            // Implementation for main: use StubMethod.instance() -> does nothing, but valid body
-            Method stubInstanceMethod = findStaticMethod(stubMethodClass, "instance");
-            Object stubImpl = stubInstanceMethod.invoke(null);
+            // ------------------------------------------------------------------
+            // Implementation for main:
+            // Use StubMethod.INSTANCE (or instance() if available) -> does nothing, but valid body
+            // ------------------------------------------------------------------
+            Object stubImpl;
+            try {
+                // Newer/alternate versions might have a static instance() method
+                Method stubInstanceMethod = stubMethodClass.getMethod("instance");
+                stubImpl = stubInstanceMethod.invoke(null);
+            } catch (NoSuchMethodException ex) {
+                // ByteBuddy 1.15.x uses StubMethod.INSTANCE
+                Field instanceField = stubMethodClass.getField("INSTANCE");
+                stubImpl = instanceField.get(null);
+            }
 
             Method interceptMain = findMethodRecursive(mainBuilder, "intercept", implementationClass);
             builder = interceptMain.invoke(mainBuilder, stubImpl);
