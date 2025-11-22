@@ -1,3 +1,5 @@
+import java.nio.charset.Charset;
+import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 
@@ -19,8 +21,9 @@ public class SpecMethodLogicAppender {
             return;
         }
 
-        String json  = Files.readString(specPath, StandardCharsets.UTF_8);
-        String logic = Files.readString(logicPath, StandardCharsets.UTF_8).trim();
+        // 🔹 Read both files with UTF-8 first, then fall back to system charset if needed
+        String json  = readTextBestEffort(specPath);
+        String logic = readTextBestEffort(logicPath).trim();
 
         if (logic.isEmpty()) {
             System.err.println("[WARN] Logic file is empty, nothing to do.");
@@ -47,9 +50,24 @@ public class SpecMethodLogicAppender {
             json = prefix + ",\n" + logicBlock + suffix;
         }
 
-        // Always overwrite the same spec file
+        // Always overwrite the same spec file (now normalized as UTF-8)
         Files.writeString(specPath, json, StandardCharsets.UTF_8);
         System.out.println("[OK] Updated spec with newMethodLogicSpec: " + specPath.toAbsolutePath());
+    }
+
+    // ---------- robust text reading helper ----------
+    private static String readTextBestEffort(Path path) throws Exception {
+        try {
+            // first try UTF-8
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (MalformedInputException e) {
+            // fall back to system default charset (e.g. Windows-1251 / 1252)
+            Charset fallback = Charset.defaultCharset();
+            System.out.println("[WARN] File " + path + " is not valid UTF-8. "
+                    + "Falling back to system charset: " + fallback);
+            byte[] bytes = Files.readAllBytes(path);
+            return new String(bytes, fallback);
+        }
     }
 
     // ---------- Args ----------
@@ -85,12 +103,14 @@ public class SpecMethodLogicAppender {
 
                 Where:
                   - --specFile   points to an existing *_spec.json produced by ClassToSpecJsonFile
-                  - --logicFile  is a UTF-8 text file whose entire contents are a natural-language
+                  - --logicFile  is a text file whose entire contents are a natural-language
                                   description of ONE new method you want OpenAI to generate.
 
                 Notes:
+                  - The tool first tries to read files as UTF-8; if that fails, it falls back
+                    to the system default charset.
                   - The logic text is stored under the key "logic_1" inside newMethodLogicSpec.
-                  - The spec file is modified in-place (overwritten).
+                  - The spec file is modified in-place (overwritten, as UTF-8).
             """);
         }
     }
