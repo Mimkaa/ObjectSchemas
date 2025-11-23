@@ -398,7 +398,7 @@ public class OpenAiDelegateGenerator {
             - If you generate a static main method (for example
               public static void main(String[] args)) and it needs to call
               ANY helper methods that are NOT static, you MUST first create
-              an instance of the delegate class and call the helpers on that
+              an instance of the parent class of the delegate class and call the helpers on that
               instance.
             - Concretely, inside main you should write something like:
                   DelegateClass delegate = new DelegateClass();
