@@ -300,6 +300,7 @@ public class OpenAiDelegateGenerator {
         return sb.toString();
     }
 
+    // 🔹 UPDATED PROMPT BUILDER
     private String buildUserPrompt(String delegateClassName,
                                    String targetSimpleName,
                                    String specJson) {
@@ -339,7 +340,7 @@ public class OpenAiDelegateGenerator {
 
             HOW TO TREAT NAMES IN LOGIC (VERY IMPORTANT)
             --------------------------------------------
-            For each entry in "newMethodLogicSpec" (methodName -> description):
+            For each entry in "newMethodLogicSpec" (methodKey -> description):
 
             1. Build an internal map of existing field names from "fields".
                Example: if fields contain an entry with "name": "age",
@@ -358,16 +359,10 @@ public class OpenAiDelegateGenerator {
                - Example: "Return a + b" with no matching fields "a" and "b":
                      -> treat "a" and "b" as PARAMETERS:
                             public int add(int a, int b) { return a + b; }
-                     -> Do NOT set a = 0; b = 0; inside the method.
                - Example: "Set age to 42" and "age" is a known field:
                      -> it is correct to generate:
                             public void initializevariables() {
                                 this.age = 42;
-                            }
-                        or, if you want to return it:
-                            public int initializevariables() {
-                                this.age = 42;
-                                return this.age;
                             }
 
             4. If the description explicitly says "create X ..." (for example:
@@ -381,14 +376,37 @@ public class OpenAiDelegateGenerator {
                - If yes, treat them as existing fields and use this.<fieldName>.
                - If not, model them as parameters or locals.
 
-            6. You may use helper methods INSIDE the class if it makes the logic clearer,
-               but you should not create arbitrary new fields except when clearly needed
-               for the internal state of the new logic.
+            SPECIAL HANDLING FOR EXPLICIT METHOD SIGNATURES (CRITICAL)
+            ----------------------------------------------------------
+            The description text may explicitly mention a FULL Java method signature,
+            for example:
+
+                "static void main(String[] args) that creates a 3x3 int matrix ..."
+
+            In that case:
+
+            - You MUST generate a method with EXACTLY that signature
+              (including 'static' and parameter list).
+            - If no access modifier is given, default to 'public'.
+              For example: "static void main(String[] args)" ->
+                   public static void main(String[] args) { ... }
+            - You may IGNORE the methodKey name when a full signature is given.
+              The signature in the description takes precedence.
 
             WHAT METHODS TO GENERATE
             ------------------------
-            - For each key in "newMethodLogicSpec", create exactly ONE NEW instance method
-              whose name is that key.
+            For each entry in "newMethodLogicSpec" (methodKey -> description):
+
+            - If the description clearly specifies a full Java method signature
+              (e.g. "static void main(String[] args)" or "int sum(int a, int b)"):
+                * Use THAT signature.
+                * Do not invent another name; do not rename it to methodKey.
+
+            - OTHERWISE (no full signature is given):
+                * Create exactly ONE new method whose name is methodKey.
+                * Choose parameters and return type that match the described behavior.
+                * The method may be instance or static depending on the logic, but
+                  if the description does not say otherwise, prefer an INSTANCE method.
 
             GENERAL SEMANTICS
             -----------------
