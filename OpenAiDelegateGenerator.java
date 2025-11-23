@@ -300,7 +300,7 @@ public class OpenAiDelegateGenerator {
         return sb.toString();
     }
 
-    // 🔹 UPDATED PROMPT BUILDER
+    // 🔹 PROMPT BUILDER: previous logic + note about main/instance helpers
     private String buildUserPrompt(String delegateClassName,
                                    String targetSimpleName,
                                    String specJson) {
@@ -401,7 +401,7 @@ public class OpenAiDelegateGenerator {
               an instance of the delegate class and call the helpers on that
               instance.
             - Concretely, inside main you should write something like:
-                  %s delegate = new %s();
+                  DelegateClass delegate = new DelegateClass();
                   delegate.someHelper(...);
               whenever someHelper(...) is not static.
             - Do NOT call instance methods directly from static main without
@@ -445,9 +445,6 @@ public class OpenAiDelegateGenerator {
             %s
             """.formatted(
                     delegateClassName, targetSimpleName, targetSimpleName,
-                    delegateClassName, targetSimpleName,
-                    // for the main/instance example:
-                    delegateClassName, delegateClassName,
                     delegateClassName, targetSimpleName,
                     specJson, EXAMPLE_DELEGATE
             );
