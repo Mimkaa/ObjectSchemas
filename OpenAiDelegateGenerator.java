@@ -300,7 +300,7 @@ public class OpenAiDelegateGenerator {
         return sb.toString();
     }
 
-    // 🔹 PROMPT BUILDER: previous logic + note about main/instance helpers
+    // 🔹 PROMPT BUILDER: previous logic + rule about main calling instance methods on parent class
     private String buildUserPrompt(String delegateClassName,
                                    String targetSimpleName,
                                    String specJson) {
@@ -396,16 +396,23 @@ public class OpenAiDelegateGenerator {
             SPECIAL HANDLING FOR main AND INSTANCE METHODS
             ----------------------------------------------
             - If you generate a static main method (for example
-              public static void main(String[] args)) and it needs to call
-              ANY helper methods that are NOT static, you MUST first create
-              an instance of the parent class of the delegate class and call the helpers on that
-              instance.
-            - Concretely, inside main you should write something like:
-                  DelegateClass delegate = new DelegateClass();
-                  delegate.someHelper(...);
-              whenever someHelper(...) is not static.
-            - Do NOT call instance methods directly from static main without
-              creating an instance first.
+              public static void main(String[] args)) and inside that main
+              you call ANY helper methods that are NOT static (for example
+              computeAndPrintStats(matrix)), you MUST:
+                * First create an instance of the PARENT / ORIGINAL class
+                  (the class described by the "target" field in the spec),
+                  NOT the delegate class;
+                * Then call the instance methods on that parent instance.
+
+              In other words, main must conceptually look like:
+
+                  ParentClass obj = new ParentClass();
+                  obj.someInstanceMethod(...);
+
+              where ParentClass is the original/target class, not the delegate.
+            - Do NOT call instance methods directly from static main.
+            - Do NOT instantiate the delegate class in order to call instance methods
+              that belong logically to the parent/original class.
 
             WHAT METHODS TO GENERATE
             ------------------------
