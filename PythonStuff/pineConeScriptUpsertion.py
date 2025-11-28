@@ -37,25 +37,27 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "This script replaces the implementation of selected methods in an existing compiled "
-            ".class file using method bodies from a delegate class. A mapping specifies which "
-            "method in the target should use the implementation of which method in the delegate."
+            "This script extracts all .class and resource files from one or more JAR archives "
+            "into the current directory or a specified output folder while preserving package "
+            "directory structure. Useful for making libraries directly visible to the JVM and "
+            "javac without needing -cp configuration."
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "ClassMethodMapper",
+            "script_name": "JarClassExtractor",
 
             "usage": (
-                "java ClassMethodMapper "
-                "--classNameToModify <FullyQualifiedClassName> "
-                "--delegateclass <FullyQualifiedDelegateClassName> "
-                "--mapping <methodA:methodB,methodC:methodD>"
+                "java JarClassExtractor "
+                "--jar <pathToJar1> [--jar <pathToJar2> ...] "
+                "[--target <outputDirectory>]"
             ),
 
             "description": (
-                "This script updates the implementation of specified methods inside an existing "
-                ".class file by substituting their bytecode with the implementations of mapped "
-                "methods from a delegate class."
+                "Extracts classes from one or more JAR files into folder structure matching "
+                "original packages so that bytecode-manipulating tools like ClassMethodCloner "
+                "and ClassMethodMapper can access ASM types without requiring classpath flags. "
+                "If no --target directory is provided, extraction occurs into current working "
+                "directory."
             )
         }
     }

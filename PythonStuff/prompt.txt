@@ -1,0 +1,23 @@
+create a folder called FIBONACCI %%%)))
+set the current working directory to FIBONACCI %%%)))
+download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
+download the library called <org.ow2.asm:asm:9.7> %%%)))
+download the library called <org.ow2.asm:asm-tree:9.7> %%%)))
+
+create a base class called FibonacciCalculator %%%)))
+create a spec file for the FibonacciCalculator class %%%)))
+
+create a spec file for the FibonacciCalculator class %%%)))
+create a text file fib.txt and the content of it should be <a public int fib(int n) method that computes the nth Fibonacci number without recursion. If n<0 return 0. If n==0 return 0. If n==1 return 1. Otherwise use two ints a=0 and b=1 then loop from 2 to n computing next values and return b at the end. This method must NOT be static.> %%%)))
+add the logic from fib.txt to the FibonacciCalculator_spec.json %%%)))
+generate a delegate from the FibonacciCalculator_spec.json %%%)))
+clone the <fib> method from <FibonacciCalculatorDelegate> into <FibonacciCalculator> %%%)))
+create a spec file for the FibonacciCalculator class %%%)))
+
+create a spec file for the FibonacciCalculator class %%%)))
+create a text file main.txt and the content of it should be <a public static void main(String[] args) method that creates new FibonacciCalculator calc, prints "fib(5) = " followed by calc.fib(5).> %%%)))
+add the logic from main.txt to the FibonacciCalculator_spec.json %%%)))
+generate a delegate from the FibonacciCalculator_spec.json %%%)))
+clone the <main> method from <FibonacciCalculatorDelegate> into <FibonacciCalculator> %%%)))
+create a spec file for the FibonacciCalculator class %%%)))
+execute the FibonacciCalculator class %%%)))

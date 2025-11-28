@@ -61,6 +61,10 @@ usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegat
 description: clones one specific method bytecode from delegate → target
 usage: java ClassMethodCloner --source <Delegate> --target <Class> --method <methodName>
 
+14) JarClassExtractor
+description: Extracts classes from one or more JAR files into folder structure matching original packages so that bytecode-manipulating tools like ClassMethodCloner and ClassMethodMapper can access ASM types without requiring classpath flags. If no --target directory is provided, extraction occurs into current working directory.
+usage: java JarClassExtractor --jar <pathToJar1> [--jar <pathToJar2> ...] [--target <outputDirectory>]
+
 ----------------------------------------
 2. GLOBAL RULES (UPDATED FOR METHOD-CLONING SYSTEM)
 ----------------------------------------
@@ -123,10 +127,14 @@ If any of the above are missing, the system must include a prompt:
 
 and execute it prior to cloning or inserting methods.
 
-Rule 12 — main() methods:
+Rule 12 - unpacking:
+after you have downloaded a library use the JarClassExtractor to get all the contents and compile the contents in the current directory
+
+
+Rule 13 — main() methods:
 Only main may be static — all others must be instance methods.
 
-Rule 13 — After any method is added or cloned:
+Rule 14 — After any method is added or cloned:
 you MUST regenerate the spec JSON.
 
 ----------------------------------------
