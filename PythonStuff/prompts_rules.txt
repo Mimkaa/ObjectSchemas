@@ -1,0 +1,149 @@
+========================================
+STECHEN SYSTEM — GPT-OPTIMIZED SPEC
+========================================
+
+This document describes all scripts, rules, and usage patterns for the STECHEN automation system.
+All instructions are written in GPT-friendly form for maximum clarity and minimal ambiguity.
+
+----------------------------------------
+1. AVAILABLE SCRIPTS (ONE-LINERS + USAGE)
+----------------------------------------
+
+1) CreateDirectory
+description: creates a directory with the given name
+usage: java CreateDirectory --name <directoryName>
+
+2) CurrentDirUpdate
+description: sets the current working directory to the specified folder
+usage: java CurrentDirUpdate --dirname <directoryName>
+
+3) CreateTextFile
+description: creates a text file and optionally inserts content into it
+usage: java CreateTextFile --name <fileName> [--path <targetPath>] [--content <textContent>]
+
+4) GitFolderDownloader
+description: rebases or updates the core driving scripts in a folder
+usage: java GitFolderDownloader --name <folderName>
+
+5) RunClass
+description: executes a compiled Java class
+usage: java RunClass --class <ClassName>
+
+6) ClassFieldAdder
+description: adds a field to an existing .class file dynamically
+usage: java ClassFieldAdder --classNameToModify <Name> --field fieldName:fieldType[:initialValue]
+
+7) DynamicClassCreator
+description: creates a new empty base .class file containing a single default method
+usage: java DynamicClassCreator --name <className>
+
+8) DynamicJarLoader
+description: loads an external library by groupId:artifactId:version
+usage: java DynamicJarLoader --library <groupId:artifactId:version>
+
+9) ClassToSpecJsonFile
+description: generates a spec JSON file listing all fields + methods of a class
+usage: java ClassToSpecJsonFile --targetFile <YourClass.class>
+
+10) SpecMethodLogicAppender
+description: appends logic from a text file into a method section of a spec JSON
+usage: java SpecMethodLogicAppender --specFile <SpecFile.json> --logicFile <MethodLogicFile.txt>
+
+11) OpenAiDelegateGenerator
+description: generates a delegate class from a spec JSON using AI
+usage: java OpenAiDelegateGenerator <Target_spec.json>
+
+12) ClassMethodAdder
+description: copies all methods from the delegate class to a target class
+usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
+
+13) ClassMethodCloner   <-- NEW PRIMARY METHOD TRANSFER SYSTEM
+description: clones one specific method bytecode from delegate → target
+usage: java ClassMethodCloner --source <Delegate> --target <Class> --method <methodName>
+
+----------------------------------------
+2. GLOBAL RULES (UPDATED FOR METHOD-CLONING SYSTEM)
+----------------------------------------
+
+Rule 1 — All instructions must be written step-by-step in natural language.  
+Each step = one prompt.
+
+Rule 2 — Directory context must be set exactly as:
+set the current working directory to <folderName>
+
+Rule 3 — Method creation pipeline (MANDATORY ORDER):
+
+1) create or update spec file      (ClassToSpecJsonFile)
+2) write logic into its own file    (CreateTextFile)
+3) append logic into spec           (SpecMethodLogicAppender)
+4) generate delegate                (OpenAiDelegateGenerator)
+5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
+
+NOTES:
+• One method = one text file  
+• One pipeline = one method  
+• Never append multiple methods per pipeline  
+• main() can only be added AFTER dependencies exist  
+• The system prefers ClassMethodCloner over MethodMapper
+
+Rule 4 — Method editing:
+To change or update a method, regenerate delegate then
+replace the original method by cloning new version using:
+ClassMethodCloner --source <Delegate> --target <Class> --method <name>
+
+Rule 5 — Start every project by creating + switching to a new folder.
+
+Rule 6 — DynamicClassCreator always produces a class containing main()
+
+Rule 7 — Every operation prompt must end with:
+%%%)))
+
+Rule 8 — Delegates are always named:
+<ClassName>Delegate.java
+
+Rule 9 — Dependency order:
+If main() uses roll(), roll must exist first — recursive logic forbidden.
+
+Rule 10 — Names of existing entities must be wrapped in <>
+<Delegate>, <Class>, <method> etc.
+
+Rule 11 — Required libraries for bytecode + method cloning:
+The STECHEN system must guarantee all core bytecode tools are installed before
+any ClassMethodCloner, ClassMethodAdder, or delegate-based method insertion.
+
+✓ Required minimum libraries:
+
+• <net.bytebuddy:byte-buddy:1.15.3>     // bytecode generation + frame calc
+• <org.ow2.asm:asm:9.7>                 // bytecode reader/writer
+• <org.ow2.asm:asm-tree:9.7>            // method node cloning + tree model
+
+If any of the above are missing, the system must include a prompt:
+
+  download the library called <groupId:artifactId:version> %%%)))
+
+and execute it prior to cloning or inserting methods.
+
+Rule 12 — main() methods:
+Only main may be static — all others must be instance methods.
+
+Rule 13 — After any method is added or cloned:
+you MUST regenerate the spec JSON.
+
+----------------------------------------
+3. EXAMPLE (GPT-FRIENDLY)
+----------------------------------------
+
+create a folder called MATRIX %%%)))
+set the current working directory to MATRIX %%%)))
+download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
+create a base class called Base %%%)))
+create a spec file for the Base class %%%)))
+create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 int matrix, fills it with numbers 1 to 9, and prints it> %%%)))
+add the logic from myMethod.txt to the Base_spec.json %%%)))
+generate a delegate from the Base_spec.json %%%)))
+clone the <main> method from <BaseDelegate> into <Base> %%%)))
+execute the Base class %%%)))
+
+----------------------------------------
+END OF SPEC
+----------------------------------------
