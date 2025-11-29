@@ -14,7 +14,7 @@ description: creates a directory with the given name
 usage: java CreateDirectory --name <directoryName>
 
 2) CurrentDirUpdate
-description: sets the current working directory to the specified folder
+description: sets the current working directory to be the specified folder(this "be" is important for no appent reason)
 usage: java CurrentDirUpdate --dirname <directoryName>
 
 3) CreateTextFile
@@ -57,23 +57,24 @@ usage: java OpenAiDelegateGenerator <Target_spec.json>
 description: copies all methods from the delegate class to a target class
 usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
 
-13) ClassMethodCloner   <-- NEW PRIMARY METHOD TRANSFER SYSTEM
+13) ClassMethodCloner   <-- PRIMARY METHOD TRANSFER SYSTEM
 description: clones one specific method bytecode from delegate → target
-usage: java ClassMethodCloner --source <Delegate> --target <Class> --method <methodName>
+usage: java ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <methodName>
 
 14) JarClassExtractor
-description: Extracts classes from one or more JAR files into folder structure matching original packages so that bytecode-manipulating tools like ClassMethodCloner and ClassMethodMapper can access ASM types without requiring classpath flags. If no --target directory is provided, extraction occurs into current working directory.
+description: Extracts classes from jar archives if needed
 usage: java JarClassExtractor --jar <pathToJar1> [--jar <pathToJar2> ...] [--target <outputDirectory>]
 
+
 ----------------------------------------
-2. GLOBAL RULES (UPDATED FOR METHOD-CLONING SYSTEM)
+2. GLOBAL RULES (UPDATED — EXTRACTION REMOVED)
 ----------------------------------------
 
-Rule 1 — All instructions must be written step-by-step in natural language.  
-Each step = one prompt.
+Rule 1 — All instructions must be written step-by-step in natural language.
+Each step = one prompt.(prefer language description to everything)
 
 Rule 2 — Directory context must be set exactly as:
-set the current working directory to <folderName>
+"set the current working directory to be <folderName>"
 
 Rule 3 — Method creation pipeline (MANDATORY ORDER):
 
@@ -84,58 +85,70 @@ Rule 3 — Method creation pipeline (MANDATORY ORDER):
 5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
 
 NOTES:
-• One method = one text file  
-• One pipeline = one method  
-• Never append multiple methods per pipeline  
-• main() can only be added AFTER dependencies exist  
-• The system prefers ClassMethodCloner over MethodMapper
+• One method = one text file
+• One pipeline = one method
+• Never append multiple methods per pipeline
+• main() can only be added AFTER dependencies exist
+• System defaults to ClassMethodCloner over ClassMethodAdder
 
-Rule 4 — Method editing:
-To change or update a method, regenerate delegate then
-replace the original method by cloning new version using:
-ClassMethodCloner --source <Delegate> --target <Class> --method <name>
+Rule 4 — Editing existing methods:
+Regenerate delegate then reclone the method back in with:
+ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <name>
 
-Rule 5 — Start every project by creating + switching to a new folder.
+Rule 5 — Each project begins with CreateDirectory + CurrentDirUpdate
 
-Rule 6 — DynamicClassCreator always produces a class containing main()
+Rule 6 — DynamicClassCreator always generates a class containing main()
 
 Rule 7 — Every operation prompt must end with:
 %%%)))
 
-Rule 8 — Delegates are always named:
+Rule 8 — Delegates always named:
 <ClassName>Delegate.java
 
 Rule 9 — Dependency order:
-If main() uses roll(), roll must exist first — recursive logic forbidden.
+If main calls buildGrid(), buildGrid must exist before main is inserted
 
-Rule 10 — Names of existing entities must be wrapped in <>
-<Delegate>, <Class>, <method> etc.
+Rule 10 — Angle brackets protocol (NAMES + LOGIC)
 
-Rule 11 — Required libraries for bytecode + method cloning:
-The STECHEN system must guarantee all core bytecode tools are installed before
-any ClassMethodCloner, ClassMethodAdder, or delegate-based method insertion.
+10a) All own identifiers must be wrapped in <angle brackets>:
+     • class names: <Base>, <DiceGame>, <CarDrawer>
+     • method names: <main>, <rollDie>, <buildGrid>
+     • file names: <DiceGame_spec.json>, <rollDie.txt>, <drawCarMain.txt>
+     • folder names: <DICE_SIM>, <CAR_DRAWING>
+     • libraries / jars: <net.bytebuddy:byte-buddy:1.15.3>
 
-✓ Required minimum libraries:
+10b) The description of the logic for a method (the text that becomes
+     the content of a .txt file via CreateTextFile --content) MUST:
 
-• <net.bytebuddy:byte-buddy:1.15.3>     // bytecode generation + frame calc
-• <org.ow2.asm:asm:9.7>                 // bytecode reader/writer
-• <org.ow2.asm:asm-tree:9.7>            // method node cloning + tree model
+     • be enclosed in ONE single pair of < >,
+       e.g. <a public int rollDie() method that returns a random integer from 1 to 6 using Math.random().>
+     • be written as natural language ONLY (no raw Java code required),
+     • NOT contain literal double quotes " or raw line breaks with ASCII art,
+       instead describe the shape in words (e.g. "print a car shape with a roof, body and two wheels").
 
-If any of the above are missing, the system must include a prompt:
-
-  download the library called <groupId:artifactId:version> %%%)))
-
-and execute it prior to cloning or inserting methods.
-
-Rule 12 - unpacking:
-after you have downloaded a library use the JarClassExtractor to get all the contents and compile the contents in the current directory
+10c) Whenever we want specific ASCII art or formatting, we describe it
+     verbally inside < > and let the system or delegate generate the
+     concrete System.out.println(...) lines later.
 
 
-Rule 13 — main() methods:
-Only main may be static — all others must be instance methods.
+Rule 11 — Required bytecode libraries must exist BEFORE method cloning
 
-Rule 14 — After any method is added or cloned:
-you MUST regenerate the spec JSON.
+Required minimum libs:
+
+• net.bytebuddy:byte-buddy:1.15.3
+• org.ow2.asm:asm:9.8
+• org.ow2.asm:asm-tree:9.8
+
+If missing, system must issue:
+download the library called <groupId:artifactId:version> %%%)))
+
+Rule 12 — [REMOVED – No extraction requirement anymore]
+
+Rule 13 — Only main may be static — all other methods instance scope
+
+Rule 14 — After cloning or adding a method:
+Regenerate the spec JSON
+
 
 ----------------------------------------
 3. EXAMPLE (GPT-FRIENDLY)
@@ -146,9 +159,9 @@ set the current working directory to MATRIX %%%)))
 download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
 create a base class called Base %%%)))
 create a spec file for the Base class %%%)))
-create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 int matrix, fills it with numbers 1 to 9, and prints it> %%%)))
-add the logic from myMethod.txt to the Base_spec.json %%%)))
-generate a delegate from the Base_spec.json %%%)))
+create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 int matrix and prints it> %%%)))
+add the logic from myMethod.txt to Base_spec.json %%%)))
+generate a delegate from Base_spec.json %%%)))
 clone the <main> method from <BaseDelegate> into <Base> %%%)))
 execute the Base class %%%)))
 

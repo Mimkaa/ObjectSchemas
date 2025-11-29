@@ -69,15 +69,32 @@ class JavaScriptRunner:
         gpt_prompt = f"""
         You are analyzing a Java command-line program.
 
-        Your task:
-        - Identify ONLY the parameters explicitly mentioned in the usage string or clearly implied in the prompt.
-        - Do NOT invent any extra fields (like 'path', 'content', or 'command') unless they are clearly required.
-        - Prefer simple, logical default values that exist in the current directory or that make sense in context.
-          For example:
-            * if it's a file name, use './example.txt'
-            * if it's a directory, use '.'
-            * if it's a library or dependency, use a realistic Maven coordinate
+        GLOBAL RULES (VERY IMPORTANT):
+        - Only use parameters that are explicitly mentioned in the usage string or clearly implied in the prompt.
+        - Do NOT invent extra parameter NAMES (like 'path', 'content', 'command') unless they appear in the usage.
+        - Do NOT invent extra parameter VALUES if they are not clearly given or implied.
+        - Prefer simple, logical default values that exist in the current directory or that make sense in context,
+          but ONLY when the usage demands a parameter and the prompt clearly implies its value.
         - Output a FLAT JSON object (no nesting, no metadata).
+
+        SPECIAL STECHEN RULE ABOUT ANGLE BRACKETS:
+        - Anything inside < and > in the ORIGINAL USER PROMPT is a literal argument VALUE.
+        - Strip the angle brackets, but otherwise copy the inside TEXT EXACTLY:
+          * No adding "./"
+          * No appending ".class"
+          * No changing case
+          * No path rewriting
+        - Examples (from ORIGINAL PROMPT, NOT USAGE PLACEHOLDERS):
+            Prompt: clone the <main> method from the <FibonacciCalculatorDelegate> into the <FibonacciCalculator>
+            → Values must be exactly:
+              "main", "FibonacciCalculatorDelegate", "FibonacciCalculator"
+
+        IMPORTANT DISTINCTION:
+        - USAGE like:  --classNameToModify <Class>
+          here <Class> is just a placeholder and SHOULD NOT be treated as a literal value.
+        - PROMPT like: clone into the <FibonacciCalculator>
+          here <FibonacciCalculator> IS a literal value and MUST be used exactly as written
+          (without < >) for the appropriate parameter.
 
         Example:
         Usage: java DynamicJarLoader --library <group:artifact:version>
@@ -87,7 +104,7 @@ class JavaScriptRunner:
           "library": "org.json:json:20210307"
         }}
 
-        Now analyze this script:
+        Now analyze this script and return ONLY the parameter dictionary:
 
         Script name: {self.script_name}
         Description: {self.description}
@@ -105,7 +122,9 @@ class JavaScriptRunner:
                         "content": (
                             "You are a precise and grounded Java CLI parameter inference engine. "
                             "Never guess or invent new parameter names. Only return parameters that "
-                            "are clearly justified by the usage string or the prompt."
+                            "are clearly justified by the usage string or the prompt. "
+                            "Respect the STECHEN rule: any <value> in the ORIGINAL PROMPT is a literal "
+                            "argument value and must be copied exactly without the angle brackets."
                         )
                     },
                     {"role": "user", "content": gpt_prompt}

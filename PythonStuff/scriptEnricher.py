@@ -21,7 +21,7 @@ class JavaScriptEnricher:
     
 
     # ---------------------------------------------------------------
-    # Infer script name and parameter JSON from LastLoadedScript.txt
+    # Infer script + JSON name from LastLoadedScript.txt
     # ---------------------------------------------------------------
     def infer_last_json(self):
         if not os.path.exists(self.last_loaded_file):
@@ -35,7 +35,6 @@ class JavaScriptEnricher:
 
         self.script_name = lines[0].strip()
         self.usage = lines[2].strip()
-
         if len(lines) >= 4:
             self.description = lines[3].strip()
 
@@ -52,7 +51,7 @@ class JavaScriptEnricher:
 
 
     # ---------------------------------------------------------------
-    # Load the JSON produced by JavaScriptRunner
+    # Load JSON containing script params
     # ---------------------------------------------------------------
     def load_json(self):
         self.infer_last_json()
@@ -66,14 +65,11 @@ class JavaScriptEnricher:
         self.description = data.get("description", self.description)
 
         print("💬 Loaded prompt from JSON.")
-        if self.description:
-            print("📄 Loaded description from JSON.")
-        else:
-            print("ℹ No description provided.")
+        print("📄 Loaded description.")
 
 
     # ---------------------------------------------------------------
-    # Decide whether enrichment is required
+    # Decide whether parameter enrichment needed
     # ---------------------------------------------------------------
     def should_enrich(self) -> bool:
         decision_prompt = f"""
@@ -85,12 +81,7 @@ class JavaScriptEnricher:
         Parameters: {json.dumps(self.params, indent=2)}
         Prompt: {self.prompt}
 
-        Enrichment needed when:
-        - The parameters are vague (e.g. 'json', 'file', 'data').
-        - A parameter requires Maven coordinates.
-        - A parameter refers to an external resource.
-
-        Respond ONLY with:
+        Respond ONLY:
         true
         or
         false
@@ -100,130 +91,39 @@ class JavaScriptEnricher:
             response = openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Respond only 'true' or 'false'. Nothing else."},
+                    {"role": "system", "content": "Respond only 'true' or 'false'."},
                     {"role": "user", "content": decision_prompt}
                 ],
                 temperature=0
             )
-
-            decision = response.choices[0].message.content.strip().lower()
-            return decision == "true"
-
-        except Exception as e:
-            print(f"⚠️ Decision failed: {e}")
+            decision = response.choices[0].message.content.strip()
+            return decision.lower() == "true"
+        except:
             return False
 
 
     # ---------------------------------------------------------------
-    # Web search for dependency enrichment
-    # ---------------------------------------------------------------
-    def web_enrich(self, query: str) -> str:
-        if not self.brave_api_key:
-            return ""
-
-        try:
-            url = "https://api.search.brave.com/res/v1/web/search"
-            headers = {
-                "Accept": "application/json",
-                "X-Subscription-Token": self.brave_api_key
-            }
-            params = {"q": query, "count": 1}
-
-            response = requests.get(url, headers=headers, params=params)
-            data = response.json()
-
-            if "web" in data and "results" in data["web"] and data["web"]["results"]:
-                first = data["web"]["results"][0]
-                return first.get("title", "") + " - " + first.get("snippet", "")
-
-        except Exception as e:
-            print(f"🌐 Web enrichment failed: {e}")
-
-        return ""
-
-
-    # ---------------------------------------------------------------
-    # Parameter enrichment (web + GPT local)
+    # Enrich dependency-style parameters (currently a no-op passthrough)
     # ---------------------------------------------------------------
     def enrich_parameters(self):
         print("🔍 Enriching parameters...")
         enriched = {}
 
-        for key, raw_value in self.params.items():
-            if not raw_value.strip():
-                enriched[key] = raw_value
-                continue
-
-            # Decide whether to web-search
-            decision_prompt = f"""
-            Parameter: {key} = {raw_value}
-
-            Should we web-search this value?
-            Respond ONLY:
-            web
-            or
-            local
-            """
-
-            try:
-                decision = openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "Respond only 'web' or 'local'."},
-                        {"role": "user", "content": decision_prompt}
-                    ],
-                    temperature=0
-                ).choices[0].message.content.strip().lower()
-            except:
-                decision = "local"
-
-            # Web enrichment branch
-            if decision == "web":
-                query = f"maven dependency {raw_value}"
-                web = self.web_enrich(query)
-                if web:
-                    cleaned = web.split("-")[0].strip()
-                    print(f"🌐 Web enriched {key}: {raw_value} → {cleaned}")
-                    enriched[key] = cleaned
-                    continue
-
-            # Local GPT enrichment
-            enrich_prompt = f"""
-            Enrich this Java CLI parameter if and only if it is a dependency.
-
-            Parameter value: {raw_value}
-
-            If it's a dependency name, convert it to a Maven coordinate.
-            If not, return it unchanged.
-
-            Return ONLY the final value.
-            """
-
-            try:
-                enriched_value = openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system",
-                         "content": "Return only the enriched parameter. If uncertain, return the original unchanged."},
-                        {"role": "user", "content": enrich_prompt}
-                    ],
-                    temperature=0
-                ).choices[0].message.content.strip()
-
-                enriched[key] = enriched_value
-
-            except Exception:
-                enriched[key] = raw_value
+        for key, raw in self.params.items():
+            if raw.strip():
+                enriched[key] = raw
+            else:
+                enriched[key] = raw  # keep unchanged
 
         self.params = enriched
 
-        print("\n🧠 Final enriched parameters:")
+        print("\n🧠 Final parameters:")
         for k, v in self.params.items():
             print(f"  --{k}: {v}")
 
 
     # ---------------------------------------------------------------
-    # Build arguments list
+    # Convert dict → CLI arg list
     # ---------------------------------------------------------------
     def build_args(self):
         self.args = []
@@ -234,14 +134,22 @@ class JavaScriptEnricher:
 
 
     # ---------------------------------------------------------------
-    # Compile and run Java script
+    # UPDATED — auto-jar classpath + force Java 17 bytecode
     # ---------------------------------------------------------------
     def compile_and_run(self):
         script_dir = os.path.dirname(self.script_path)
 
-        print(f"\n⚡ Compiling {self.script_name}.java...")
+        # detect all *.jar files in folder
+        jars = [f for f in os.listdir(script_dir) if f.endswith(".jar")]
+        # Windows-style classpath; adjust manually if you ever run on Linux/macOS
+        cp = ".;" + ";".join(jars) if jars else "."
+
+        print("\n📦 Detected JARs:", jars if jars else "NONE")
+
+        print(f"\n⚡ Compiling {self.script_name}.java ...")
+        # 🔑 Force Java 17 classfile version regardless of installed JDK
         result = subprocess.run(
-            ["javac", self.script_path],
+            ["javac", "--release", "17", "-cp", cp, self.script_path],
             capture_output=True,
             text=True,
             cwd=script_dir
@@ -252,11 +160,10 @@ class JavaScriptEnricher:
             return
 
         print("✅ Compilation successful.")
-
-        print(f"🚀 Running {self.script_name} with args:", " ".join(self.args))
+        print("🚀 Running", self.script_name)
 
         run = subprocess.run(
-            ["java", self.script_name] + self.args,
+            ["java", "-cp", cp, self.script_name] + self.args,
             capture_output=True,
             text=True,
             cwd=script_dir
@@ -277,10 +184,9 @@ class JavaScriptEnricher:
             self.load_json()
 
             if self.should_enrich():
-                print("✨ Enrichment is needed.")
                 self.enrich_parameters()
             else:
-                print("🟢 Enrichment skipped — script appears self-contained.")
+                print("🟢 Enrichment skipped — script self-contained.")
 
             self.build_args()
             self.compile_and_run()

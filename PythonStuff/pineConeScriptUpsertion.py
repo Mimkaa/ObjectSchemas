@@ -37,27 +37,21 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "This script extracts all .class and resource files from one or more JAR archives "
-            "into the current directory or a specified output folder while preserving package "
-            "directory structure. Useful for making libraries directly visible to the JVM and "
-            "javac without needing -cp configuration."
+            "this copied a method from a delegate to a class on assembly level"
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "JarClassExtractor",
+            "script_name": "ClassMethodCloner",
 
             "usage": (
-                "java JarClassExtractor "
-                "--jar <pathToJar1> [--jar <pathToJar2> ...] "
-                "[--target <outputDirectory>]"
+                "java -cp .;asm-9.7.jar;asm-tree-9.7.jar ClassMethodCloner "
+                "--classNameToModify <FullyQualifiedClassName> "
+                "--delegateclass <FullyQualifiedDelegateClassName> "
+                "--method <methodName>"
             ),
 
             "description": (
-                "Extracts classes from one or more JAR files into folder structure matching "
-                "original packages so that bytecode-manipulating tools like ClassMethodCloner "
-                "and ClassMethodMapper can access ASM types without requiring classpath flags. "
-                "If no --target directory is provided, extraction occurs into current working "
-                "directory."
+                "this copied a method from a delegate to a class on assembly level"
             )
         }
     }
