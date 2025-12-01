@@ -11,9 +11,9 @@ import java.nio.file.Paths;
 /**
  * Command-line tool:
  *
- *   java OpenAiDelegateGenerator Loco_spec.json
+ *   java OpenAiDelegateGenerator Base_spec.json
  *   or
- *   java OpenAiDelegateGenerator --Target_spec Loco_spec.json
+ *   java OpenAiDelegateGenerator --Target_spec Base_spec.json
  *
  * Requires:
  *   - Java 11+
@@ -21,49 +21,31 @@ import java.nio.file.Paths;
  *
  * Effect:
  *   - Reads <Target>_spec.json
- *   - Asks OpenAI to generate a delegate class
- *   - Writes <TargetSimpleName>Delegate.java in the same directory
- *   - Then compiles it to <TargetSimpleName>Delegate.class via javac
+ *   - Asks OpenAI (GPT-5.1) to generate a delegate class
+ *   - Delegate may include NEW FIELDS, NEW METHODS, or BOTH
+ *   - Writes <TargetSimpleName>Delegate.java and compiles it automatically
  */
 public class OpenAiDelegateGenerator {
 
     private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-    private static final String MODEL = "gpt-4.1-mini";
+
+    // Upgraded model
+    private static final String MODEL = "gpt-5.1";
 
     private final String apiKey;
     private final HttpClient httpClient;
 
-    // A short style example so the model matches your vibe
+    // Style example (vibe only)
     private static final String EXAMPLE_DELEGATE = """
-        /**
-         * Simple delegate class for testing ClassMethodAdder
-         */
-        public class SimpleDelegate {
+        public class SampleDelegate extends Sample {
+            public int score = 0;
 
-            // Instance field to demonstrate state
-            private int callCount = 0;
-
-            public String getGreeting() {
-                return "Hello from SimpleDelegate!";
+            public void add(int x) {
+                score += x;
             }
 
-            public String processText(String input) {
-                return "Processed: " + input.toUpperCase();
-            }
-
-            public int calculate(int a, int b) {
-                return a + b;
-            }
-
-            public String getStatus() {
-                return "System is working!";
-            }
-
-            public String getInstanceInfo() {
-                callCount++;
-                return "Instance: " + this.getClass().getSimpleName() +
-                       " | Calls: " + callCount +
-                       " | Hash: " + System.identityHashCode(this);
+            public int get() {
+                return score;
             }
         }
         """;
@@ -71,27 +53,23 @@ public class OpenAiDelegateGenerator {
     public OpenAiDelegateGenerator() {
         this.apiKey = System.getenv("OPENAI_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("OPENAI_API_KEY environment variable is not set");
+            throw new IllegalStateException("OPENAI_API_KEY environment variable missing");
         }
         this.httpClient = HttpClient.newHttpClient();
     }
 
-    // ------------------------------------------------------------
-    // main: accepts either positional spec.json or --Target_spec <file>
-    // ------------------------------------------------------------
+    // =====================================================================
+    // MAIN
+    // =====================================================================
     public static void main(String[] args) {
         String specFile = null;
 
         if (args.length == 1 && !args[0].startsWith("--")) {
-            // Positional form: java OpenAiDelegateGenerator Loco_spec.json
             specFile = args[0];
         } else {
-            // Flag form: java OpenAiDelegateGenerator --Target_spec Loco_spec.json
             for (int i = 0; i < args.length; i++) {
-                String arg = args[i];
-                if ("--Target_spec".equals(arg) && i + 1 < args.length) {
+                if ("--Target_spec".equals(args[i]) && i + 1 < args.length) {
                     specFile = args[++i];
-                    break;
                 }
             }
         }
@@ -106,380 +84,272 @@ public class OpenAiDelegateGenerator {
             System.exit(1);
         }
 
-        Path specPath = Paths.get(specFile);
-
         try {
-            OpenAiDelegateGenerator gen = new OpenAiDelegateGenerator();
-            Path out = gen.generateDelegateFile(specPath);
-            System.out.println("Generated delegate: " + out.toAbsolutePath());
+            Path out = new OpenAiDelegateGenerator().generateDelegateFile(Paths.get(specFile));
+            System.out.println("\n✔ Delegate generated → " + out.toAbsolutePath());
         } catch (Exception e) {
-            System.err.println("Error while generating delegate:");
+            System.err.println("\n❌ Error during delegate creation:");
             e.printStackTrace();
-            System.exit(1);
         }
     }
 
-    /**
-     * Reads <Target>_spec.json, asks OpenAI for the delegate, writes <TargetSimpleName>Delegate.java,
-     * prints its content, and compiles it to <TargetSimpleName>Delegate.class.
-     */
+    // =====================================================================
+    // CORE GENERATION
+    // =====================================================================
     public Path generateDelegateFile(Path specPath) throws IOException, InterruptedException {
         String specJson = Files.readString(specPath, StandardCharsets.UTF_8);
 
-        String fileName = specPath.getFileName().toString();
-        String baseName = fileName.replace("_spec.json", "").replace(".json", "");
+        String base = specPath.getFileName().toString()
+                .replace("_spec.json", "")
+                .replace(".json", "");
 
-        // Try to infer target simple name from the JSON "target" field.
-        String inferredTargetSimpleName = extractTargetSimpleName(specJson, baseName);
-        String delegateClassName = inferredTargetSimpleName + "Delegate";
+        String original = extractTargetSimpleName(specJson, base);
+        String delegateName = original + "Delegate";
 
-        String javaSource = generateDelegateSource(delegateClassName, inferredTargetSimpleName, specJson);
+        String javaSource = generateDelegateSource(delegateName, original, specJson);
 
-        Path outPath = specPath.getParent() == null
-                ? Paths.get(delegateClassName + ".java")
-                : specPath.getParent().resolve(delegateClassName + ".java");
+        Path out = specPath.getParent() != null ?
+                specPath.getParent().resolve(delegateName + ".java") :
+                Paths.get(delegateName + ".java");
 
-        Files.writeString(outPath, javaSource, StandardCharsets.UTF_8);
-        System.out.println("Wrote delegate source: " + outPath.toAbsolutePath());
+        Files.writeString(out, javaSource, StandardCharsets.UTF_8);
 
-        // 🔹 Print the generated delegate before compilation
-        System.out.println("===== GENERATED DELEGATE SOURCE =====");
-        System.out.println(javaSource);
-        System.out.println("===== END GENERATED DELEGATE SOURCE =====");
+        System.out.println("\n===== GENERATED DELEGATE SOURCE =====\n" + javaSource + "\n===== END =====");
 
-        // Compile the generated Java file
-        compileGeneratedJava(outPath);
-
-        return outPath;
+        compile(out);
+        return out;
     }
 
-    /**
-     * Extracts the simple class name from the "target" field of the spec JSON.
-     * If anything fails, falls back to the provided baseName.
-     *
-     * Examples:
-     *   "target": "Dori"                    -> "Dori"
-     *   "target": "com.example.model.Dori"  -> "Dori"
-     */
-    private static String extractTargetSimpleName(String specJson, String fallbackBaseName) {
+    // =====================================================================
+    // SPEC NAME EXTRACTION
+    // =====================================================================
+    private static String extractTargetSimpleName(String json, String fallback) {
         try {
-            String key = "\"target\"";
-            int idx = specJson.indexOf(key);
-            if (idx < 0) {
-                return fallbackBaseName;
-            }
-            int colon = specJson.indexOf(':', idx + key.length());
-            if (colon < 0) {
-                return fallbackBaseName;
-            }
-            int firstQuote = specJson.indexOf('"', colon);
-            if (firstQuote < 0) {
-                return fallbackBaseName;
-            }
-            int secondQuote = specJson.indexOf('"', firstQuote + 1);
-            if (secondQuote < 0) {
-                return fallbackBaseName;
-            }
-            String targetValue = specJson.substring(firstQuote + 1, secondQuote).trim();
-            if (targetValue.isEmpty()) {
-                return fallbackBaseName;
-            }
-            // If target is fully qualified, strip package
-            int lastDot = targetValue.lastIndexOf('.');
-            if (lastDot >= 0 && lastDot < targetValue.length() - 1) {
-                return targetValue.substring(lastDot + 1);
-            }
-            return targetValue;
-        } catch (Exception e) {
-            return fallbackBaseName;
-        }
+            int idx = json.indexOf("\"target\"");
+            if (idx < 0) return fallback;
+
+            int c = json.indexOf(':', idx);
+            int q1 = json.indexOf('"', c);
+            int q2 = json.indexOf('"', q1 + 1);
+
+            String full = json.substring(q1 + 1, q2).trim();
+            if (full.isEmpty()) return fallback;
+
+            int dot = full.lastIndexOf('.');
+            return (dot >= 0) ? full.substring(dot + 1) : full;
+
+        } catch (Exception e) { return fallback; }
     }
 
-    /**
-     * Calls OpenAI and returns the generated delegate class as plain Java source text.
-     */
-    public String generateDelegateSource(String delegateClassName,
-                                         String targetSimpleName,
-                                         String specJson)
+    // =====================================================================
+    // OPENAI REQUEST → DELEGATE JAVA CLASS
+    // =====================================================================
+    private String generateDelegateSource(String delegateName,
+                                          String parentName,
+                                          String specJson)
             throws IOException, InterruptedException {
 
         String systemPrompt = """
-            You are an expert senior Java engineer.
-            Generate ONLY a full Java class. No explanations.
+            You generate ONLY a valid Java delegate class. No explanations.
             """;
 
-        String userPrompt = buildUserPrompt(delegateClassName, targetSimpleName, specJson);
+        String userPrompt = """
+            You are given a SPEC describing a Java class structure.
+            The delegate you generate MUST extend the original base class.
 
-        String requestBody = buildRequestBody(systemPrompt, userPrompt);
+            The SPEC may contain:
+              - "target"             : fully qualified or simple base class name.
+              - "fields"             : array of existing fields on the base class.
+              - "methods"            : array of existing methods on the base class.
+              - "newFieldDescSpec"   : OPTIONAL. Object mapping fieldName → natural language
+                                       description of a NEW FIELD to add (for transfer).
+              - "newMethodLogicSpec" : OPTIONAL. Object mapping key → natural language
+                                       description of NEW METHODS to generate.
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(OPENAI_URL))
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .build();
+            CLASS DECLARATION (STRICT)
+            --------------------------
+            You MUST output exactly one class:
 
-        HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() / 100 != 2) {
-            throw new IOException("OpenAI API error " + response.statusCode() + ": " + response.body());
-        }
-
-        String body = response.body();
-
-        // Very simple extraction of "content" from the first choice.
-        String marker = "\"content\":";
-        int idx = body.indexOf(marker);
-        if (idx < 0) {
-            throw new IOException("No 'content' field in OpenAI response: " + body);
-        }
-        int startQuote = body.indexOf('"', idx + marker.length());
-        if (startQuote < 0) {
-            throw new IOException("Malformed 'content' field in OpenAI response");
-        }
-        StringBuilder content = new StringBuilder();
-        boolean escaped = false;
-        for (int i = startQuote + 1; i < body.length(); i++) {
-            char c = body.charAt(i);
-            if (escaped) {
-                switch (c) {
-                    case 'n' -> content.append('\n');
-                    case 'r' -> content.append('\r');
-                    case 't' -> content.append('\t');
-                    case '"' -> content.append('"');
-                    case '\\' -> content.append('\\');
-                    default -> content.append(c);
+                public class %s extends %s {
+                    ...
                 }
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                break;
-            } else {
-                content.append(c);
-            }
-        }
 
-        return content.toString().trim();
-    }
+            Do NOT change the name.
+            Do NOT omit or change 'extends %s'.
+            No extra classes, no outer wrappers, no markdown.
 
-    // Build the JSON request body manually (no JSON lib)
-    private String buildRequestBody(String systemPrompt, String userPrompt) {
-        String sysJson = toJsonString(systemPrompt);
-        String userJson = toJsonString(userPrompt);
+            FIELD GENERATION RULES (CRITICAL)
+            ---------------------------------
+            1) All NEW fields that are meant to be transferred (cloned into the base)
+               come from newFieldDescSpec.
 
-        return """
-        {
-          "model": "%s",
-          "messages": [
-            { "role": "system", "content": %s },
-            { "role": "user",   "content": %s }
-          ],
-          "temperature": 0.2
-        }
-        """.formatted(MODEL, sysJson, userJson);
-    }
+               For EACH entry (fieldName → description) in newFieldDescSpec:
+                 • Declare a field with EXACTLY that fieldName.
+                 • Infer its type from the description text.
+                 • The field MUST be declared as PUBLIC.
+                     Example:
+                         public java.util.ArrayList<String> stringList;
+                         public String extraString;
 
-    // Escape a Java String to a JSON string literal (including quotes)
-    private static String toJsonString(String s) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '\\' -> sb.append("\\\\");
-                case '"'  -> sb.append("\\\"");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default   -> sb.append(c);
-            }
-        }
-        sb.append('"');
-        return sb.toString();
-    }
+            2) Do NOT re-declare fields already present in the "fields" array of the spec.
+               Only add truly NEW fields requested in newFieldDescSpec.
 
-    // 🔹 PROMPT BUILDER: previous logic + rule about main calling instance methods on parent class
-    private String buildUserPrompt(String delegateClassName,
-                                   String targetSimpleName,
-                                   String specJson) {
-        return """
-            You are given a JSON SPEC describing an EXISTING Java class.
-            It contains:
-              - "target": the original class name (possibly fully qualified).
-              - "fields": fields that ALREADY exist in the original class.
-              - "methods": methods that ALREADY exist in the original class.
-              - "newMethodLogicSpec": OPTIONAL. A map from NEW method names
-                to natural-language descriptions of what those NEW methods
-                should do.
+            3) If newFieldDescSpec is present and non-empty but newMethodLogicSpec is
+               missing or empty, you MUST generate a delegate that ONLY contains:
+                 • the public fields based on newFieldDescSpec
+                 • and NO methods.
 
-            IMPORTANT: CONTEXT VS NEW CODE
-            --------------------------------
-            - The "fields" and "methods" entries describe what ALREADY EXISTS
-              in the original class. They are CONTEXT for you.
-            - You MUST NOT:
-                  * re-declare those existing methods,
-                  * change their bodies, signatures, or modifiers,
-                  * re-declare the existing fields or change their type/modifiers.
-            - HOWEVER, you ARE allowed to read and write those existing fields
-              inside the new methods you generate, exactly as if your code
-              were placed inside the original class (for example: this.age = 42; is OK).
-            - Think of the generated methods as code that will be injected into
-              the original class later.
+            4) If BOTH newFieldDescSpec and newMethodLogicSpec exist, then:
+                 • All fields created from newFieldDescSpec MUST be public.
+                 • Methods are allowed (see method rules below).
 
-            CLASS NAME AND EXTENDS CLAUSE
-            -----------------------------
-            - The class you generate MUST be declared EXACTLY as:
-                  public class %s extends %s {
-                      ...
-                  }
-            - Do NOT change the class name.
-            - Do NOT omit the 'extends %s'.
-            - Do NOT extend any other type.
+            METHOD GENERATION RULES
+            -----------------------
+            1) Methods come from newMethodLogicSpec.
+               Each value is a natural-language description of one method
+               (like "a non static method named addAndPrint ...").
 
-            HOW TO TREAT NAMES IN LOGIC (VERY IMPORTANT)
-            --------------------------------------------
-            For each entry in "newMethodLogicSpec" (methodKey -> description):
+            2) You must convert each description into ONE valid Java method:
+                 • If the description gives an explicit signature
+                     e.g. "static void main(String[] args) that ..."
+                     use that exact signature (add 'public' if no access modifier).
+                 • Otherwise, infer return type and parameters from the description.
 
-            1. Build an internal map of existing field names from "fields".
-               Example: if fields contain an entry with "name": "age",
-               you know there is already a field called "age" on the original class.
+            3) Methods may read and write the following fields:
+                 • Any public fields you declared from newFieldDescSpec
+                   (for example: stringList, extraString).
+                 • Any existing fields from the "fields" array that are
+                   NOT marked as private (i.e. no 'private' modifier there).
 
-            2. When reading the natural-language description, for every identifier-like term
-               that looks like a variable (for example: "name", "numbers", "age", etc.):
-               - If this name EXACTLY matches a known field name from "fields", then:
-                   * Treat it as an EXISTING field on the class.
-                   * You may freely read and write it, e.g. this.age = 42; age++; etc.
-                   * Do NOT create a new field with that name.
-               - If the name does NOT match any field in "fields":
-                   * Prefer to model it as a METHOD PARAMETER or a LOCAL VARIABLE.
+               IMPORTANT:
+                 • Do NOT directly access fields that are listed in "fields" with
+                   a 'private' modifier, unless you also declared a NEW public
+                   field with the same meaning via newFieldDescSpec.
+                 • In practice: for methods that should work with transferred
+                   fields, you normally use the public fields coming from
+                   newFieldDescSpec.
 
-            3. The method signatures you choose MUST be consistent with the logic:
-               - Example: "Return a + b" with no matching fields "a" and "b":
-                     -> treat "a" and "b" as PARAMETERS:
-                            public int add(int a, int b) { return a + b; }
-               - Example: "Set age to 42" and "age" is a known field:
-                     -> it is correct to generate:
-                            public void initializevariables() {
-                                this.age = 42;
-                            }
+            4) Methods must follow the semantics of the description exactly.
+               For example, for:
 
-            4. If the description explicitly says "create X ..." (for example:
-                  "create numbers list of type List<Integer> and fill it"):
-               - Then declare a LOCAL variable named X inside the method with
-                 an appropriate type.
-               - Do NOT add X as a new field of the class.
+                 "a non static method named addAndPrint with no parameters and no
+                  return value that does the following steps in order:
+                    first ensure that the stringList field is initialized by checking
+                    if it is null and if so creating a new java.util.ArrayList<String>
+                    and assigning it to stringList, then add the extraString field value
+                    to the stringList list, then iterate over all elements of stringList
+                    in insertion order and print each element on its own line using
+                    System.out.println"
 
-            5. When the description says "use numbers" or "use name":
-               - Check carefully if "numbers" or "name" exist as fields.
-               - If yes, treat them as existing fields and use this.<fieldName>.
-               - If not, model them as parameters or locals.
+               you should generate something along the lines of:
 
-            SPECIAL HANDLING FOR EXPLICIT METHOD SIGNATURES (CRITICAL)
-            ----------------------------------------------------------
-            The description text may explicitly mention a FULL Java method signature,
-            for example:
+                 public void addAndPrint() {
+                     if (this.stringList == null) {
+                         this.stringList = new java.util.ArrayList<String>();
+                     }
+                     this.stringList.add(this.extraString);
+                     for (String s : this.stringList) {
+                         System.out.println(s);
+                     }
+                 }
 
-                "static void main(String[] args) that creates a 3x3 int matrix ..."
+               (using public fields generated from newFieldDescSpec).
 
-            In that case:
-
-            - You MUST generate a method with EXACTLY that signature
-              (including 'static' and parameter list).
-            - If no access modifier is given, default to 'public'.
-              For example: "static void main(String[] args)" ->
-                   public static void main(String[] args) { ... }
-            - You may IGNORE the methodKey name when a full signature is given.
-              The signature in the description takes precedence.
-
-            SPECIAL HANDLING FOR main AND INSTANCE METHODS
-            ----------------------------------------------
-            - If you generate a static main method (for example
-              public static void main(String[] args)) and inside that main
-              you call ANY helper methods that are NOT static (for example
-              computeAndPrintStats(matrix)), you MUST:
-                * First create an instance of the PARENT / ORIGINAL class
-                  (the class described by the "target" field in the spec),
-                  NOT the delegate class;
-                * Then call the instance methods on that parent instance.
-
-              In other words, main must conceptually look like:
-
-                  ParentClass obj = new ParentClass();
-                  obj.someInstanceMethod(...);
-
-              where ParentClass is the original/target class, not the delegate.
-            - Do NOT call instance methods directly from static main.
-            - Do NOT instantiate the delegate class in order to call instance methods
-              that belong logically to the parent/original class.
-
-            WHAT METHODS TO GENERATE
-            ------------------------
-            For each entry in "newMethodLogicSpec" (methodKey -> description):
-
-            - If the description clearly specifies a full Java method signature
-              (e.g. "static void main(String[] args)" or "int sum(int a, int b)"):
-                * Use THAT signature.
-                * Do not invent another name; do not rename it to methodKey.
-
-            - OTHERWISE (no full signature is given):
-                * Create exactly ONE new method whose name is methodKey.
-                * Choose parameters and return type that match the described behavior.
-                * The method may be instance or static depending on the logic, but
-                  if the description does not say otherwise, prefer an INSTANCE method.
-
-            GENERAL SEMANTICS
-            -----------------
-            - Do NOT re-declare or modify the signatures/modifiers of existing fields/methods.
-            - You MAY read and write existing fields in the new methods.
-            - Prefer parameters and locals for new concepts that are not fields.
+            5) Methods may be instance or static depending on the description.
+               If not specified, prefer instance methods (non-static).
 
             OUTPUT REQUIREMENTS
             -------------------
-            - Output ONLY a single valid Java class with:
+            • Output ONLY one complete Java class:
                   public class %s extends %s { ... }
-            - Do NOT wrap it in Markdown.
-            - Do NOT output any explanation text.
-            - The result must compile as-is (assuming standard Java and imports).
+            • No markdown, no backticks, no commentary, no extra text.
 
-            JSON SPEC (context only, NOT to be echoed in output):
-            -----------------------------------------------------
+            RAW SPEC FOR CONTEXT (DO NOT ECHO VERBATIM):
+            --------------------------------------------
             %s
 
-            STYLE EXAMPLE (for formatting / vibe only, do NOT copy literally):
-            ------------------------------------------------------------------
+            STYLE EXAMPLE (JUST FOR VIBE, DO NOT COPY LITERALLY):
+            ----------------------------------------------------
             %s
             """.formatted(
-                    delegateClassName, targetSimpleName, targetSimpleName,
-                    delegateClassName, targetSimpleName,
-                    specJson, EXAMPLE_DELEGATE
-            );
+                delegateName, parentName, parentName,
+                delegateName, parentName,
+                specJson, EXAMPLE_DELEGATE
+        );
+
+        String requestBody = """
+        {
+          "model": "%s",
+          "messages":[
+            {"role":"system","content":%s},
+            {"role":"user","content":%s}
+          ],
+          "temperature":0.2
+        }
+        """.formatted(MODEL, toJson(systemPrompt), toJson(userPrompt));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(OPENAI_URL))
+                .header("Authorization","Bearer " + apiKey)
+                .header("Content-Type","application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() / 100 != 2) {
+            throw new IOException("OpenAI " + resp.statusCode() + " → " + resp.body());
+        }
+
+        String body = resp.body();
+        int p = body.indexOf("\"content\":");
+        int q = body.indexOf('"', p + 10);
+        StringBuilder out = new StringBuilder();
+        boolean esc = false;
+
+        for (int i = q + 1; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (esc) {
+                if (c == 'n') out.append('\n');
+                else if (c == 't') out.append('\t');
+                else out.append(c);
+                esc = false;
+            } else if (c == '\\') {
+                esc = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                out.append(c);
+            }
+        }
+
+        return out.toString().trim();
     }
 
-    // ------------------------------------------------------------
-    // compile the generated Java file using javac
-    // ------------------------------------------------------------
-    private void compileGeneratedJava(Path javaFile) throws IOException, InterruptedException {
-        System.out.println("Compiling generated file: " + javaFile);
+    private static String toJson(String s) {
+        return '"' + s
+                .replace("\\","\\\\")
+                .replace("\"","\\\"")
+                .replace("\n","\\n") + '"';
+    }
 
-        ProcessBuilder pb = new ProcessBuilder("javac", javaFile.toString());
-        pb.redirectErrorStream(true);
+    // =====================================================================
+    // COMPILE RESULT
+    // =====================================================================
+    private void compile(Path file) throws IOException, InterruptedException {
+        System.out.println("\nCompiling " + file.getFileName());
 
-        Process p = pb.start();
+        Process p = new ProcessBuilder("javac", file.toString())
+                .redirectErrorStream(true)
+                .start();
 
-        String result = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        int exitCode = p.waitFor();
+        String out = new String(p.getInputStream().readAllBytes());
+        int code = p.waitFor();
 
-        if (exitCode == 0) {
-            Path classFile = javaFile.getParent() == null
-                    ? Paths.get(javaFile.getFileName().toString().replace(".java", ".class"))
-                    : javaFile.getParent().resolve(javaFile.getFileName().toString().replace(".java", ".class"));
-
-            System.out.println("Compiled successfully: " + classFile.toAbsolutePath());
+        System.out.println(out);
+        if (code == 0) {
+            System.out.println("✔ Compilation success\n");
         } else {
-            System.err.println("Compilation failed with exit code " + exitCode + ":");
-            System.err.println(result);
+            System.out.println("❌ Compile error: " + code);
         }
     }
 }

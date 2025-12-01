@@ -50,25 +50,29 @@ SpecMethodLogicAppender
 description: appends logic from a text file into a method section of a spec JSON
 usage: java SpecMethodLogicAppender --specFile <SpecFile.json> --logicFile <MethodLogicFile.txt>
 
+SpecFieldLogicAppender
+description: appends a NEW FIELD description inside "newFieldDescSpec" section of a spec JSON
+usage: java SpecFieldLogicAppender --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <nameOfField>
+
 OpenAiDelegateGenerator
 description: generates a delegate class from a spec JSON using AI
 usage: java OpenAiDelegateGenerator <Target_spec.json>
 
 ClassMethodAdder
-description: copies all methods from the delegate class to a target class
+description: copies all methods from delegate into target class
 usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
 
-ClassMethodCloner  <-- PRIMARY METHOD TRANSFER SYSTEM
-description: clones one specific method bytecode from delegate → target
+ClassMethodCloner   <-- PRIMARY METHOD TRANSFER
+description: clones ONE method bytecode from delegate → target
 usage: java ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <methodName>
 
 JarClassExtractor
-description: Extracts classes from jar archives if needed
-usage: java JarClassExtractor --jar <pathToJar1> [--jar <pathToJar2> ...] [--target <outputDirectory>]
+description: extracts classes from .jar files
+usage: java JarClassExtractor --jar <jar1> [--jar <jar2> ...] [--target <outputDirectory>]
 
-ClassFieldCloner
-description: copies a single field definition from a delegate class into a target class on assembly level
-usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <FullyQualifiedClassName> --delegateclass <FullyQualifiedDelegateClassName> --field <fieldName>
+ClassFieldCloner   <-- PRIMARY FIELD TRANSFER
+description: copies a single public field from delegate → base at bytecode level
+usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <BaseClass> --delegateclass <DelegateClass> --field <fieldName>
 
 
 ----------------------------------------
@@ -76,136 +80,121 @@ GLOBAL RULES
 ----------------------------------------
 
 Rule 1 — All instructions must be written step-by-step in natural language.
-Each step = one prompt. Prefer descriptive English over code.
+One instruction = one line.
 
-Rule 2 — Directory context must be set exactly as:
-"set the current working directory to be <folderName>"
+Rule 2 — Directory must always be set exactly as:
+set the current working directory to be <folderName> %%%)))
 
 
 ────────────────────────────────────────
 Rule 3 — METHOD CREATION PIPELINE
 ────────────────────────────────────────
 
-1) create or update spec file      (ClassToSpecJsonFile)
-2) write logic into its own file    (CreateTextFile)
-3) append logic into spec           (SpecMethodLogicAppender)
-4) generate delegate                (OpenAiDelegateGenerator)
-5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
+1) create or update spec file              (ClassToSpecJsonFile)
+2) write logic into a txt file             (CreateTextFile)
+3) append method logic using               (SpecMethodLogicAppender)
+4) generate delegate                       (OpenAiDelegateGenerator)
+5) insert method using                     (ClassMethodCloner preferred) or ClassMethodAdder
 
 Notes:
-• One method = one text file  
-• One pipeline = one method  
-• Never append multiple methods in one pipeline  
-• main() may only be added AFTER dependencies exist  
-• System defaults to ClassMethodCloner over ClassMethodAdder  
+• One method per file
+• One file per pipeline
+• No multiple method logic blocks at once
+• main() may only be inserted if deps exist
+• ClassMethodCloner is default insertion tool
 
 
 ────────────────────────────────────────
-Rule 3.5 — FIELD CREATION PIPELINE
+Rule 3.5 — FIELD CREATION PIPELINE  (Corrected)
 ────────────────────────────────────────
 
-Field creation follows the exact same pipeline as methods — only step 5 differs.
+Field creation mirrors method creation — only appender + step 5 change.
 
-1) create or update spec file using ClassToSpecJsonFile  
-2) write the field description to a <fieldName>.txt file  
-3) append field definition into spec JSON via SpecMethodLogicAppender  
-4) generate delegate using OpenAiDelegateGenerator  
-5) insert field using ClassFieldAdder OR ClassFieldCloner  
+1) create or update spec JSON using         (ClassToSpecJsonFile)
+2) write field description to <field>.txt   (CreateTextFile)
+3) append field into spec using             (SpecFieldLogicAppender)  <-- replaces Method appender
+4) generate delegate via                    (OpenAiDelegateGenerator)
+5) insert field using                       (ClassFieldCloner preferred) or ClassFieldAdder
 
-Additional Field Rules:
-• One field = one pipeline  
-• Never insert multiple fields per pipeline  
-• Delegates must be regenerated after each field addition  
-• Field descriptions must be natural language inside < >  
-• **Cloning is always preferred over adding**  
+Field requirements:
+• NEW field logic must be natural language in < >
+• One field = one pipeline
+• Delegates must be regenerated every field addition
+• **All generated fields in delegate are public — ALWAYS**
+• Cloning is ALWAYS preferred over adding 
 
 
 ────────────────────────────────────────
-Rule 3.6 — UNIFIED DELEGATE GENERATION PRINCIPLE (NEW)
+Rule 3.6 — UNIFIED DELEGATE PATH (MUST FOLLOW)
 ────────────────────────────────────────
 
-The delegate serves as the **universal transfer mechanism** for ALL new structures.
+Spec → Delegate → Clone/Add → Base
 
-Delegate may contain:
-• only new methods
-• only new fields
-• or both at the same time
+Always required for:
+✔ new methods
+✔ new fields
+✔ mixed upgrades
 
-Delegate generation uses **the same pipeline** for:
-✔ Method creation  
-✔ Field creation  
-✔ Mixed expansion  
-
-Spec → Delegate → Clone/Add → Base Class  
-is ALWAYS the required insertion path.
-
-No structure may bypass delegate generation.
+Nothing may bypass delegate generation.
 
 
 Rule 4 — Editing existing methods:
-Regenerate delegate then reclone the method using:
-ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <name>
+Regenerate delegate + re-clone using ClassMethodCloner.
 
-Rule 5 — Every project begins with:
+Rule 5 — Every new project starts:
 CreateDirectory + CurrentDirUpdate
 
 
-Rule 6 — DynamicClassCreator always generates a class containing main()
-and exactly one default String field named "name", plus "sayHello()".
+Rule 6 — DynamicClassCreator always generates:
+• class with one default String field "name"
+• one public method sayHello()
 
 
-Rule 7 — Every operation prompt MUST end with:
+Rule 7 — Every instruction line MUST end with:
 %%%)))
 
 
-Rule 8 — Delegates always named:
+Rule 8 — Delegates ALWAYS named:
 <ClassName>Delegate.java
 
 
-Rule 9 — Dependency order:
-If main() calls something, that something must exist before insertion.
+Rule 9 — Dependency rule:
+If A calls B → B must exist before A is inserted.
 
 
 ────────────────────────────────────────
 Rule 10 — ANGLE BRACKET PROTOCOL
 ────────────────────────────────────────
 
-10a — All identifiers MUST be wrapped in < >  
-(Class, field, method, file, folder, library names)
-
-10b — Logic files must contain ONE < > capsule only  
-Pure natural language — NO Java syntax required
-
-10c — ASCII or formatting must be described verbally  
+10a — ALL identifiers must be <wrappedLikeThis>  
+10b — A logic file contains ONE <description capsule> only  
+10c — ASCII drawings must be described, not drawn  
 
 
-Rule 11 — Required bytecode libraries BEFORE cloning:
+Rule 11 — Required libs BEFORE cloning:
 
 • net.bytebuddy:byte-buddy:1.15.3
 • org.ow2.asm:asm:9.8
 • org.ow2.asm:asm-tree:9.8
 
 
-Rule 12 — Removed.
-
+Rule 12 — (removed)
 
 Rule 13 — Only main() may be static.
 
-
-Rule 14 — After any cloning or addition:
-Regenerate spec JSON.
+Rule 14 — After every clone/add → regenerate spec JSON.
 
 
 ----------------------------------------
-EXAMPLE WORKFLOW
+EXAMPLE EXECUTION
 ----------------------------------------
 
 create a folder called MATRIX %%%)))
-set the current working directory to MATRIX %%%)))
+set the current working directory to be MATRIX %%%)))
 download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
 create a base class called Base %%%)))
 create a spec file for the Base class %%%)))
-create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 int matrix and prints it> %%%)))
+create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 matrix and prints it> %%%)))
 add the logic from myMethod.txt to <Base_spec.json> %%%)))
 generate a delegate from <Base_spec.json> %%%)))
 clone the <main> method from <BaseDelegate> into <Base> %%%)))
