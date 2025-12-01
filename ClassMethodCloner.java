@@ -1,14 +1,11 @@
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.*;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 
 public class ClassMethodCloner {
@@ -52,13 +49,13 @@ public class ClassMethodCloner {
         System.out.println("ClassMethodCloner - Copy method bytecode from delegate into base class");
         System.out.println();
         System.out.println("Usage:");
-        System.out.println("  java -cp .;asm-9.7.jar;asm-tree-9.7.jar ClassMethodCloner \\");
+        System.out.println("  java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassMethodCloner \\");
         System.out.println("      --classNameToModify <FullyQualifiedClassName> \\");
         System.out.println("      --delegateclass <FullyQualifiedDelegateClassName> \\");
         System.out.println("      --method <methodName>");
         System.out.println();
         System.out.println("Example:");
-        System.out.println("  java -cp .;asm-9.7.jar;asm-tree-9.7.jar ClassMethodCloner \\");
+        System.out.println("  java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassMethodCloner \\");
         System.out.println("      --classNameToModify FibonacciCalculator \\");
         System.out.println("      --delegateclass FibonacciCalculatorDelegate \\");
         System.out.println("      --method fib");
@@ -93,6 +90,10 @@ public class ClassMethodCloner {
         ClassNode delegateNode = new ClassNode();
         new ClassReader(delegateBytes).accept(delegateNode, 0);
 
+        // Internal names, e.g. "Base" or "com/example/Base"
+        String baseInternalName = baseNode.name;          // ***
+        String delegateInternalName = delegateNode.name;  // ***
+
         // Find method in delegate
         MethodNode sourceMethod = findMethodByName(delegateNode, methodName);
         if (sourceMethod == null) {
@@ -102,24 +103,26 @@ public class ClassMethodCloner {
 
         System.out.println("  [FOUND] Delegate method: " + formatSig(sourceMethod));
 
+        // *** Create a remapped copy where all delegate-owner references become base-owner
+        MethodNode remappedMethod = copyAndRemapOwner(sourceMethod, delegateInternalName, baseInternalName);
+
         // Look for matching method (name + descriptor) in base
-        MethodNode existing = findMethodByNameAndDesc(baseNode, sourceMethod.name, sourceMethod.desc);
+        MethodNode existing = findMethodByNameAndDesc(baseNode, remappedMethod.name, remappedMethod.desc);
 
         if (existing != null) {
             System.out.println("  [INFO] Base already has method with same name+desc: " +
                     formatSig(existing));
             System.out.println("  [ACTION] Replacing base method body with delegate method body.");
-            replaceMethodBody(existing, sourceMethod);
+            replaceMethodBody(existing, remappedMethod);
         } else {
-            System.out.println("  [ACTION] Adding new method to base: " + formatSig(sourceMethod));
-            MethodNode cloned = cloneMethodNode(sourceMethod);
-            baseNode.methods.add(cloned);
+            System.out.println("  [ACTION] Adding new method to base: " + formatSig(remappedMethod));
+            baseNode.methods.add(remappedMethod);
         }
 
         // Write backup
         backupOnce(basePath);
 
-        // Write modified class
+        // Write modified class (recompute frames & maxs)
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         baseNode.accept(cw);
         byte[] modifiedBytes = cw.toByteArray();
@@ -141,8 +144,6 @@ public class ClassMethodCloner {
             if ((m.access & Opcodes.ACC_BRIDGE) != 0) continue;
 
             if (candidate != null) {
-                // If there are multiple overloads, this is ambiguous.
-                // For a simple case like 'fib(int)', you usually only have one.
                 System.out.println("  [WARN] Multiple methods named '" + name + "' in delegate; " +
                         "using the first one: " + formatSig(candidate));
                 return candidate;
@@ -172,8 +173,15 @@ public class ClassMethodCloner {
         // access/name/desc/signature/exceptions we leave as they are in the base method
     }
 
-    private static MethodNode cloneMethodNode(MethodNode source) {
-        MethodNode clone = new MethodNode(
+    /**
+     * Create a deep copy of the source method and remap any owner references
+     * from 'fromInternalName' to 'toInternalName'.
+     */
+    private static MethodNode copyAndRemapOwner(MethodNode source,
+                                                String fromInternalName,
+                                                String toInternalName) {
+
+        MethodNode copy = new MethodNode(
                 source.access,
                 source.name,
                 source.desc,
@@ -182,9 +190,45 @@ public class ClassMethodCloner {
                         ? null
                         : source.exceptions.toArray(new String[0])
         );
-        // Copy the body via accept
-        source.accept(clone);
-        return clone;
+
+        // First, create a deep copy via accept
+        source.accept(copy);
+
+        // Then walk instructions and remap owners where needed
+        for (org.objectweb.asm.tree.AbstractInsnNode insn = copy.instructions.getFirst();
+             insn != null;
+             insn = insn.getNext()) {
+
+            if (insn instanceof FieldInsnNode fieldInsn) {
+                if (fieldInsn.owner.equals(fromInternalName)) {
+                    fieldInsn.owner = toInternalName;
+                }
+            } else if (insn instanceof MethodInsnNode methodInsn) {
+                if (methodInsn.owner.equals(fromInternalName)) {
+                    methodInsn.owner = toInternalName;
+                }
+            } else if (insn instanceof TypeInsnNode typeInsn) {
+                // For NEW, CHECKCAST, INSTANCEOF, ANEWARRAY etc. if they refer to delegate
+                if (typeInsn.desc.equals(fromInternalName)) {
+                    typeInsn.desc = toInternalName;
+                }
+            }
+        }
+
+        // Optionally, also remap local variable types that refer to the delegate
+        if (copy.localVariables != null) {
+            for (Object o : copy.localVariables) {
+                LocalVariableNode lv = (LocalVariableNode) o;
+                if (lv.desc != null && lv.desc.contains(fromInternalName)) {
+                    lv.desc = lv.desc.replace(fromInternalName, toInternalName);
+                }
+                if (lv.signature != null && lv.signature.contains(fromInternalName)) {
+                    lv.signature = lv.signature.replace(fromInternalName, toInternalName);
+                }
+            }
+        }
+
+        return copy;
     }
 
     private static void backupOnce(Path classFile) throws IOException {
