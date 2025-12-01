@@ -1,74 +1,72 @@
 ========================================
 STECHEN SYSTEM — GPT-OPTIMIZED SPEC
-========================================
 
 This document describes all scripts, rules, and usage patterns for the STECHEN automation system.
 All instructions are written in GPT-friendly form for maximum clarity and minimal ambiguity.
 
-----------------------------------------
-1. AVAILABLE SCRIPTS (ONE-LINERS + USAGE)
-----------------------------------------
+AVAILABLE SCRIPTS (ONE-LINERS + USAGE)
 
-1) CreateDirectory
+CreateDirectory
 description: creates a directory with the given name
 usage: java CreateDirectory --name <directoryName>
 
-2) CurrentDirUpdate
+CurrentDirUpdate
 description: sets the current working directory to be the specified folder(this "be" is important for no appent reason)
 usage: java CurrentDirUpdate --dirname <directoryName>
 
-3) CreateTextFile
+CreateTextFile
 description: creates a text file and optionally inserts content into it
 usage: java CreateTextFile --name <fileName> [--path <targetPath>] [--content <textContent>]
 
-4) GitFolderDownloader
+GitFolderDownloader
 description: rebases or updates the core driving scripts in a folder
 usage: java GitFolderDownloader --name <folderName>
 
-5) RunClass
+RunClass
 description: executes a compiled Java class
 usage: java RunClass --class <ClassName>
 
-6) ClassFieldAdder
+ClassFieldAdder
 description: adds a field to an existing .class file dynamically
-usage: java ClassFieldAdder --classNameToModify <Name> --field fieldName:fieldType[:initialValue]
+usage: java ClassFieldAdder --classNameToModify <Name> --field fieldName:fieldType
 
-7) DynamicClassCreator
+DynamicClassCreator
 description: creates a new empty base .class file containing a single default method
 usage: java DynamicClassCreator --name <className>
 
-8) DynamicJarLoader
+DynamicJarLoader
 description: loads an external library by groupId:artifactId:version
 usage: java DynamicJarLoader --library <groupId:artifactId:version>
 
-9) ClassToSpecJsonFile
+ClassToSpecJsonFile
 description: generates a spec JSON file listing all fields + methods of a class
 usage: java ClassToSpecJsonFile --targetFile <YourClass.class>
 
-10) SpecMethodLogicAppender
+SpecMethodLogicAppender
 description: appends logic from a text file into a method section of a spec JSON
 usage: java SpecMethodLogicAppender --specFile <SpecFile.json> --logicFile <MethodLogicFile.txt>
 
-11) OpenAiDelegateGenerator
+OpenAiDelegateGenerator
 description: generates a delegate class from a spec JSON using AI
 usage: java OpenAiDelegateGenerator <Target_spec.json>
 
-12) ClassMethodAdder
+ClassMethodAdder
 description: copies all methods from the delegate class to a target class
 usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
 
-13) ClassMethodCloner   <-- PRIMARY METHOD TRANSFER SYSTEM
+ClassMethodCloner <-- PRIMARY METHOD TRANSFER SYSTEM
 description: clones one specific method bytecode from delegate → target
 usage: java ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <methodName>
 
-14) JarClassExtractor
+JarClassExtractor
 description: Extracts classes from jar archives if needed
 usage: java JarClassExtractor --jar <pathToJar1> [--jar <pathToJar2> ...] [--target <outputDirectory>]
 
+ClassFieldCloner
+description: copies a single field definition from a delegate class into a target class on assembly level
+usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <FullyQualifiedClassName> --delegateclass <FullyQualifiedDelegateClassName> --field <fieldName>
 
-----------------------------------------
-2. GLOBAL RULES (UPDATED — EXTRACTION REMOVED)
-----------------------------------------
+GLOBAL RULES (UPDATED — EXTRACTION REMOVED)
 
 Rule 1 — All instructions must be written step-by-step in natural language.
 Each step = one prompt.(prefer language description to everything)
@@ -78,11 +76,15 @@ Rule 2 — Directory context must be set exactly as:
 
 Rule 3 — Method creation pipeline (MANDATORY ORDER):
 
-1) create or update spec file      (ClassToSpecJsonFile)
-2) write logic into its own file    (CreateTextFile)
-3) append logic into spec           (SpecMethodLogicAppender)
-4) generate delegate                (OpenAiDelegateGenerator)
-5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
+create or update spec file (ClassToSpecJsonFile)
+
+write logic into its own file (CreateTextFile)
+
+append logic into spec (SpecMethodLogicAppender)
+
+generate delegate (OpenAiDelegateGenerator)
+
+add OR clone methods into class (ClassMethodAdder OR ClassMethodCloner)
 
 NOTES:
 • One method = one text file
@@ -97,7 +99,18 @@ ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --metho
 
 Rule 5 — Each project begins with CreateDirectory + CurrentDirUpdate
 
-Rule 6 — DynamicClassCreator always generates a class containing main()
+Rule 6 — DynamicClassCreator always generates a class containing main().
+After creation, the base class has exactly one String field named "name" and a fixed initial method set. In JSON-style metadata this corresponds to a single String field:
+
+fields: [
+  {"name":"name","type":"java.lang.String"}
+]
+
+
+and a methods list that includes at least one method with modifiers ["public","static"] together with a "sayHello" method defined as:
+
+{"name":"sayHello","returnType":"java.lang.String","parameters":[],"throws":[],"modifiers":["public"]}
+
 
 Rule 7 — Every operation prompt must end with:
 %%%)))
@@ -111,25 +124,25 @@ If main calls buildGrid(), buildGrid must exist before main is inserted
 Rule 10 — Angle brackets protocol (NAMES + LOGIC)
 
 10a) All own identifiers must be wrapped in <angle brackets>:
-     • class names: <Base>, <DiceGame>, <CarDrawer>
-     • method names: <main>, <rollDie>, <buildGrid>
-     • file names: <DiceGame_spec.json>, <rollDie.txt>, <drawCarMain.txt>
-     • folder names: <DICE_SIM>, <CAR_DRAWING>
-     • libraries / jars: <net.bytebuddy:byte-buddy:1.15.3>
+• class names: <Base>, <DiceGame>, <CarDrawer>
+• method names: <main>, <rollDie>, <buildGrid>
+• file names: <DiceGame_spec.json>, <rollDie.txt>, <drawCarMain.txt>
+• folder names: <DICE_SIM>, <CAR_DRAWING>
+• libraries / jars: <net.bytebuddy:byte-buddy:1.15.3>
 
 10b) The description of the logic for a method (the text that becomes
-     the content of a .txt file via CreateTextFile --content) MUST:
+the content of a .txt file via CreateTextFile --content) MUST:
 
-     • be enclosed in ONE single pair of < >,
-       e.g. <a public int rollDie() method that returns a random integer from 1 to 6 using Math.random().>
-     • be written as natural language ONLY (no raw Java code required),
-     • NOT contain literal double quotes " or raw line breaks with ASCII art,
-       instead describe the shape in words (e.g. "print a car shape with a roof, body and two wheels").
+ • be enclosed in ONE single pair of \< >,  
+   e.g. \<a public int rollDie() method that returns a random integer from 1 to 6 using Math.random().>  
+ • be written as natural language ONLY (no raw Java code required),  
+ • NOT contain literal double quotes " or raw line breaks with ASCII art,  
+   instead describe the shape in words (e.g. "print a car shape with a roof, body and two wheels").  
+
 
 10c) Whenever we want specific ASCII art or formatting, we describe it
-     verbally inside < > and let the system or delegate generate the
-     concrete System.out.println(...) lines later.
-
+verbally inside < > and let the system or delegate generate the
+concrete System.out.println(...) lines later.
 
 Rule 11 — Required bytecode libraries must exist BEFORE method cloning
 
@@ -149,10 +162,7 @@ Rule 13 — Only main may be static — all other methods instance scope
 Rule 14 — After cloning or adding a method:
 Regenerate the spec JSON
 
-
-----------------------------------------
-3. EXAMPLE (GPT-FRIENDLY)
-----------------------------------------
+EXAMPLE (GPT-FRIENDLY)
 
 create a folder called MATRIX %%%)))
 set the current working directory to MATRIX %%%)))
@@ -165,6 +175,4 @@ generate a delegate from Base_spec.json %%%)))
 clone the <main> method from <BaseDelegate> into <Base> %%%)))
 execute the Base class %%%)))
 
-----------------------------------------
 END OF SPEC
-----------------------------------------

@@ -37,25 +37,26 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "this copied a method from a delegate to a class on assembly level"
+            "this copied a field definition from a delegate to a class on assembly level"
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "ClassMethodCloner",
+            "script_name": "ClassFieldCloner",
 
             "usage": (
-                "java -cp .;asm-9.7.jar;asm-tree-9.7.jar ClassMethodCloner "
+                "java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner "
                 "--classNameToModify <FullyQualifiedClassName> "
                 "--delegateclass <FullyQualifiedDelegateClassName> "
-                "--method <methodName>"
+                "--field <fieldName>"
             ),
 
             "description": (
-                "this copied a method from a delegate to a class on assembly level"
+                "this copied a field definition from a delegate to a class on assembly level"
             )
         }
     }
 ]
+
 
 
 
