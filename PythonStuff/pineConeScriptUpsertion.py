@@ -37,28 +37,28 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "Copies a field declaration from a delegate class into a target class at the bytecode level using ASM. "
-            "This enables dynamic field injection without modifying source files."
+            "Adds new field definitions and optional initialization logic to a spec JSON file from plain text. "
+            "Allows extending a class blueprint with new fields declaratively before runtime code generation."
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "ClassFieldCloner",
+            "script_name": "SpecFieldLogicAppender",
 
             "usage": (
-                "java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner "
-                "--classNameToModify <FullyQualifiedClassName> "
-                "--delegateclass <FullyQualifiedDelegateClassName> "
-                "--field <fieldName>"
-            ),
+    "java SpecFieldLogicAppender "
+    "--specFile <YourSpecFile.json> "
+    "--logicFile <YourFieldLogicFile.txt> "
+    "--fieldName <FieldName>"
+),
 
             "description": (
-                "Transfers a field from delegate to target using ASM by cloning its bytecode definition. "
-                "Useful for extending classes dynamically or merging class structure at runtime."
+                "Reads a text file containing field definitions and initialization instructions, then appends them "
+                "into a class spec JSON. Supports adding new fields, default values, and initialization logic, making "
+                "it useful for evolving class structure before delegate generation or bytecode injection."
             )
         }
     }
 ]
-
 
 
 

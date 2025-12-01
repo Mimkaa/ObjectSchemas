@@ -1,10 +1,14 @@
 ========================================
 STECHEN SYSTEM — GPT-OPTIMIZED SPEC
+========================================
 
 This document describes all scripts, rules, and usage patterns for the STECHEN automation system.
 All instructions are written in GPT-friendly form for maximum clarity and minimal ambiguity.
 
+
+----------------------------------------
 AVAILABLE SCRIPTS (ONE-LINERS + USAGE)
+----------------------------------------
 
 CreateDirectory
 description: creates a directory with the given name
@@ -54,7 +58,7 @@ ClassMethodAdder
 description: copies all methods from the delegate class to a target class
 usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
 
-ClassMethodCloner <-- PRIMARY METHOD TRANSFER SYSTEM
+ClassMethodCloner  <-- PRIMARY METHOD TRANSFER SYSTEM
 description: clones one specific method bytecode from delegate → target
 usage: java ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <methodName>
 
@@ -66,15 +70,21 @@ ClassFieldCloner
 description: copies a single field definition from a delegate class into a target class on assembly level
 usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <FullyQualifiedClassName> --delegateclass <FullyQualifiedDelegateClassName> --field <fieldName>
 
-GLOBAL RULES (UPDATED — EXTRACTION REMOVED)
+
+----------------------------------------
+GLOBAL RULES
+----------------------------------------
 
 Rule 1 — All instructions must be written step-by-step in natural language.
-Each step = one prompt.(prefer language description to everything)
+Each step = one prompt. Prefer descriptive English over code.
 
 Rule 2 — Directory context must be set exactly as:
 "set the current working directory to be <folderName>"
 
-Rule 3 — Method creation pipeline (MANDATORY ORDER):
+
+────────────────────────────────────────
+Rule 3 — METHOD CREATION PIPELINE
+────────────────────────────────────────
 
 1) create or update spec file      (ClassToSpecJsonFile)
 2) write logic into its own file    (CreateTextFile)
@@ -82,108 +92,113 @@ Rule 3 — Method creation pipeline (MANDATORY ORDER):
 4) generate delegate                (OpenAiDelegateGenerator)
 5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
 
-NOTES:
-• One method = one text file
-• One pipeline = one method
-• Never append multiple methods per pipeline
-• main() can only be added AFTER dependencies exist
-• System defaults to ClassMethodCloner over ClassMethodAdder
+Notes:
+• One method = one text file  
+• One pipeline = one method  
+• Never append multiple methods in one pipeline  
+• main() may only be added AFTER dependencies exist  
+• System defaults to ClassMethodCloner over ClassMethodAdder  
 
-────────────────────────────────────────────────────────────
-Rule 3.5 — FIELD CREATION PIPELINE (mirrors method workflow)
-────────────────────────────────────────────────────────────
-Adding a field to a class MUST follow the exact same 5-step pipeline
-as adding a method, with only the final step differing.
 
-The sequence is:
+────────────────────────────────────────
+Rule 3.5 — FIELD CREATION PIPELINE
+────────────────────────────────────────
+
+Field creation follows the exact same pipeline as methods — only step 5 differs.
 
 1) create or update spec file using ClassToSpecJsonFile  
-2) write the field description to a .txt file (CreateTextFile)  
-3) append field definition into the spec JSON (SpecMethodLogicAppender)  
-4) generate delegate from updated spec (OpenAiDelegateGenerator)  
+2) write the field description to a <fieldName>.txt file  
+3) append field definition into spec JSON via SpecMethodLogicAppender  
+4) generate delegate using OpenAiDelegateGenerator  
 5) insert field using ClassFieldAdder OR ClassFieldCloner  
 
-ADDITIONAL FIELD RULES:
-
+Additional Field Rules:
 • One field = one pipeline  
-• Never insert multiple fields in a single pipeline  
-• Delegates must be regenerated after field insertion  
-• Field names MUST follow <angle bracket> protocol  
-• If field is primitive or object type, describe it naturally inside < > (no raw Java syntax)  
-• **Cloning is always preferable to adding** — if both operations are possible,  
-  ClassFieldCloner should be used instead of ClassFieldAdder.
+• Never insert multiple fields per pipeline  
+• Delegates must be regenerated after each field addition  
+• Field descriptions must be natural language inside < >  
+• **Cloning is always preferred over adding**  
+
+
+────────────────────────────────────────
+Rule 3.6 — UNIFIED DELEGATE GENERATION PRINCIPLE (NEW)
+────────────────────────────────────────
+
+The delegate serves as the **universal transfer mechanism** for ALL new structures.
+
+Delegate may contain:
+• only new methods
+• only new fields
+• or both at the same time
+
+Delegate generation uses **the same pipeline** for:
+✔ Method creation  
+✔ Field creation  
+✔ Mixed expansion  
+
+Spec → Delegate → Clone/Add → Base Class  
+is ALWAYS the required insertion path.
+
+No structure may bypass delegate generation.
 
 
 Rule 4 — Editing existing methods:
-Regenerate delegate then reclone the method back in with:
+Regenerate delegate then reclone the method using:
 ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <name>
 
-Rule 5 — Each project begins with CreateDirectory + CurrentDirUpdate
-
-Rule 6 — DynamicClassCreator always generates a class containing main().
-After creation, the base class has exactly one String field named "name" and a fixed initial method set. In JSON-style metadata this corresponds to a single String field:
-
-fields: [
-  {"name":"name","type":"java.lang.String"}
-]
+Rule 5 — Every project begins with:
+CreateDirectory + CurrentDirUpdate
 
 
-and a methods list that includes at least one method with modifiers ["public","static"] together with a "sayHello" method defined as:
+Rule 6 — DynamicClassCreator always generates a class containing main()
+and exactly one default String field named "name", plus "sayHello()".
 
-{"name":"sayHello","returnType":"java.lang.String","parameters":[],"throws":[],"modifiers":["public"]}
 
-
-Rule 7 — Every operation prompt must end with:
+Rule 7 — Every operation prompt MUST end with:
 %%%)))
+
 
 Rule 8 — Delegates always named:
 <ClassName>Delegate.java
 
+
 Rule 9 — Dependency order:
-If main calls buildGrid(), buildGrid must exist before main is inserted
-
-Rule 10 — Angle brackets protocol (NAMES + LOGIC)
-
-10a) All own identifiers must be wrapped in <angle brackets>:
-• class names: <Base>, <DiceGame>, <CarDrawer>
-• method names: <main>, <rollDie>, <buildGrid>
-• file names: <DiceGame_spec.json>, <rollDie.txt>, <drawCarMain.txt>
-• folder names: <DICE_SIM>, <CAR_DRAWING>
-• libraries / jars: <net.bytebuddy:byte-buddy:1.15.3>
-
-10b) The description of the logic for a method (the text that becomes
-the content of a .txt file via CreateTextFile --content) MUST:
-
- • be enclosed in ONE single pair of \< >,  
-   e.g. \<a public int rollDie() method that returns a random integer from 1 to 6 using Math.random().>  
- • be written as natural language ONLY (no raw Java code required),  
- • NOT contain literal double quotes " or raw line breaks with ASCII art,  
-   instead describe the shape in words (e.g. "print a car shape with a roof, body and two wheels").  
+If main() calls something, that something must exist before insertion.
 
 
-10c) Whenever we want specific ASCII art or formatting, we describe it
-verbally inside < > and let the system or delegate generate the
-concrete System.out.println(...) lines later.
+────────────────────────────────────────
+Rule 10 — ANGLE BRACKET PROTOCOL
+────────────────────────────────────────
 
-Rule 11 — Required bytecode libraries must exist BEFORE method cloning
+10a — All identifiers MUST be wrapped in < >  
+(Class, field, method, file, folder, library names)
 
-Required minimum libs:
+10b — Logic files must contain ONE < > capsule only  
+Pure natural language — NO Java syntax required
+
+10c — ASCII or formatting must be described verbally  
+
+
+Rule 11 — Required bytecode libraries BEFORE cloning:
 
 • net.bytebuddy:byte-buddy:1.15.3
 • org.ow2.asm:asm:9.8
 • org.ow2.asm:asm-tree:9.8
 
-If missing, system must issue:
-download the library called <groupId:artifactId:version> %%%)))
 
-Rule 12 — [REMOVED – No extraction requirement anymore]
+Rule 12 — Removed.
 
-Rule 13 — Only main may be static — all other methods instance scope
 
-Rule 14 — After cloning or adding a method:
-Regenerate the spec JSON
+Rule 13 — Only main() may be static.
 
-EXAMPLE (GPT-FRIENDLY)
+
+Rule 14 — After any cloning or addition:
+Regenerate spec JSON.
+
+
+----------------------------------------
+EXAMPLE WORKFLOW
+----------------------------------------
 
 create a folder called MATRIX %%%)))
 set the current working directory to MATRIX %%%)))
@@ -191,9 +206,11 @@ download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
 create a base class called Base %%%)))
 create a spec file for the Base class %%%)))
 create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 int matrix and prints it> %%%)))
-add the logic from myMethod.txt to Base_spec.json %%%)))
-generate a delegate from Base_spec.json %%%)))
+add the logic from myMethod.txt to <Base_spec.json> %%%)))
+generate a delegate from <Base_spec.json> %%%)))
 clone the <main> method from <BaseDelegate> into <Base> %%%)))
 execute the Base class %%%)))
 
+----------------------------------------
 END OF SPEC
+----------------------------------------
