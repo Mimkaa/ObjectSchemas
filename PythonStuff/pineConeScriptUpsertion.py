@@ -37,7 +37,8 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "this copied a field definition from a delegate to a class on assembly level"
+            "Copies a field declaration from a delegate class into a target class at the bytecode level using ASM. "
+            "This enables dynamic field injection without modifying source files."
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
@@ -51,11 +52,13 @@ scripts_to_add = [
             ),
 
             "description": (
-                "this copied a field definition from a delegate to a class on assembly level"
+                "Transfers a field from delegate to target using ASM by cloning its bytecode definition. "
+                "Useful for extending classes dynamically or merging class structure at runtime."
             )
         }
     }
 ]
+
 
 
 

@@ -76,15 +76,11 @@ Rule 2 — Directory context must be set exactly as:
 
 Rule 3 — Method creation pipeline (MANDATORY ORDER):
 
-create or update spec file (ClassToSpecJsonFile)
-
-write logic into its own file (CreateTextFile)
-
-append logic into spec (SpecMethodLogicAppender)
-
-generate delegate (OpenAiDelegateGenerator)
-
-add OR clone methods into class (ClassMethodAdder OR ClassMethodCloner)
+1) create or update spec file      (ClassToSpecJsonFile)
+2) write logic into its own file    (CreateTextFile)
+3) append logic into spec           (SpecMethodLogicAppender)
+4) generate delegate                (OpenAiDelegateGenerator)
+5) add OR clone methods into class  (ClassMethodAdder OR ClassMethodCloner)
 
 NOTES:
 • One method = one text file
@@ -92,6 +88,31 @@ NOTES:
 • Never append multiple methods per pipeline
 • main() can only be added AFTER dependencies exist
 • System defaults to ClassMethodCloner over ClassMethodAdder
+
+────────────────────────────────────────────────────────────
+Rule 3.5 — FIELD CREATION PIPELINE (mirrors method workflow)
+────────────────────────────────────────────────────────────
+Adding a field to a class MUST follow the exact same 5-step pipeline
+as adding a method, with only the final step differing.
+
+The sequence is:
+
+1) create or update spec file using ClassToSpecJsonFile  
+2) write the field description to a .txt file (CreateTextFile)  
+3) append field definition into the spec JSON (SpecMethodLogicAppender)  
+4) generate delegate from updated spec (OpenAiDelegateGenerator)  
+5) insert field using ClassFieldAdder OR ClassFieldCloner  
+
+ADDITIONAL FIELD RULES:
+
+• One field = one pipeline  
+• Never insert multiple fields in a single pipeline  
+• Delegates must be regenerated after field insertion  
+• Field names MUST follow <angle bracket> protocol  
+• If field is primitive or object type, describe it naturally inside < > (no raw Java syntax)  
+• **Cloning is always preferable to adding** — if both operations are possible,  
+  ClassFieldCloner should be used instead of ClassFieldAdder.
+
 
 Rule 4 — Editing existing methods:
 Regenerate delegate then reclone the method back in with:
