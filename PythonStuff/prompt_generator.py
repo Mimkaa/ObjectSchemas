@@ -58,7 +58,7 @@ def generate_commands(goal: str) -> str:
         model=OPENAI_MODEL,
         instructions="Produce ONLY STECHEN prompts. No other syntax allowed.",
         input=stechen_prompt(goal),
-        max_output_tokens=2048,
+        max_output_tokens=8192,
         temperature=0.1
     )
     text = response.output_text.strip()

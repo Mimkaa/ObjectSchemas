@@ -37,28 +37,32 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "Adds new field definitions and optional initialization logic to a spec JSON file from plain text. "
-            "Allows extending a class blueprint with new fields declaratively before runtime code generation."
+            "Appends method logic from a text file into an existing spec JSON file. Use this script when you want "
+            "to extend a class specification with new method bodies, behavioral instructions, or implementation "
+            "details provided in plain text. Typical natural language prompts that should map to this script include: "
+            "\"add logic to this spec\", \"append this method body\", \"insert method logic from a text file\", "
+            "\"extend the spec with this implementation\", \"merge this logic into the method entry\", "
+            "\"inject method behavior into the spec\", or \"import method code into the spec file\". "
+            "This script is part of STECHEN’s declarative workflow, enabling method implementations to be added "
+            "before generating delegates or performing bytecode-level modifications."
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "SpecFieldLogicAppender",
+            "script_name": "SpecMethodLogicAppender",
 
             "usage": (
-    "java SpecFieldLogicAppender "
-    "--specFile <YourSpecFile.json> "
-    "--logicFile <YourFieldLogicFile.txt> "
-    "--fieldName <FieldName>"
-),
+                "java SpecMethodLogicAppender "
+                "--specFile <YourSpecFile.json> "
+                "--logicFile <YourLogicFile.txt>"
+            ),
 
             "description": (
-                "Reads a text file containing field definitions and initialization instructions, then appends them "
-                "into a class spec JSON. Supports adding new fields, default values, and initialization logic, making "
-                "it useful for evolving class structure before delegate generation or bytecode injection."
+                "Appends method logic from a text file into a spec file."
             )
         }
     }
 ]
+
 
 
 

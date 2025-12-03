@@ -1,0 +1,28 @@
+scripts_to_add = [
+    {
+        "description": (
+            "Appends method logic from a text file into an existing spec JSON file. Use this script when you want "
+            "to extend a class specification with new method bodies, behavioral instructions, or implementation "
+            "details provided in plain text. Typical natural language prompts that should map to this script include: "
+            "\"add logic to this spec\", \"append this method body\", \"insert method logic from a text file\", "
+            "\"extend the spec with this implementation\", \"merge this logic into the method entry\", "
+            "\"inject method behavior into the spec\", or \"import method code into the spec file\". "
+            "This script is part of STECHEN’s declarative workflow, enabling method implementations to be added "
+            "before generating delegates or performing bytecode-level modifications."
+        )[:MAX_DESCRIPTION_LENGTH],
+
+        "metadata": {
+            "script_name": "SpecMethodLogicAppender",
+
+            "usage": (
+                "java SpecMethodLogicAppender "
+                "--specFile <YourSpecFile.json> "
+                "--logicFile <YourLogicFile.txt>"
+            ),
+
+            "description": (
+                "Appends method logic from a text file into a spec file."
+            )
+        }
+    }
+]
