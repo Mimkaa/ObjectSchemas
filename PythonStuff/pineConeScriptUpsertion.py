@@ -55,7 +55,7 @@ scripts_to_add = [
 
             "usage": (
                 "java OpenAiFieldDelegateGenerator "
-                "<Target_spec.json>"
+                "--Target_spec <SpecFile.json>"
             ),
 
             "description": (
@@ -84,7 +84,7 @@ scripts_to_add = [
 
             "usage": (
                 "java OpenAiMethodDelegateGenerator "
-                "<Target_spec.json>"
+                "--Target_spec <SpecFile.json>"
             ),
 
             "description": (

@@ -52,15 +52,15 @@ usage: java SpecMethodLogicAppender --specFile <SpecFile.json> --logicFile <Meth
 
 SpecFieldLogicAppender
 description: appends a NEW FIELD description inside "newFieldDescSpec" section of a spec JSON
-usage: java SpecFieldLogicAppender --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <nameOfField>
+usage: java SpecFieldLogicAppender --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <FieldName>
 
 OpenAiFieldDelegateGenerator
 description: generates a field-only delegate class from a spec JSON using AI (public fields for cloning)
-usage: java OpenAiFieldDelegateGenerator <Target_spec.json>
+usage: java OpenAiFieldDelegateGenerator --Target_spec <SpecFile.json>
 
 OpenAiMethodDelegateGenerator
 description: generates a method-focused delegate class from a spec JSON using AI (methods for cloning)
-usage: java OpenAiMethodDelegateGenerator <Target_spec.json>
+usage: java OpenAiMethodDelegateGenerator --Target_spec <SpecFile.json>
 
 ClassMethodAdder
 description: copies all methods from delegate into target class
@@ -123,16 +123,22 @@ Rule 3.5 — FIELD CREATION PIPELINE  (Corrected)
 Field creation mirrors method creation — only appender + delegate + step 5 change.
 
 1) create or update spec JSON using         (ClassToSpecJsonFile)
-2) write field description to <field>.txt   (CreateTextFile)
-3) append field into spec using             (SpecFieldLogicAppender)  <-- replaces Method appender
+2) write field description to <FieldNameField.txt> with natural language capsule
+   Example instruction:
+   create a text file <secretWordField.txt> and the content of it should be <natural-language description of the secretWord field> %%%)))
+3) append field into spec using             (SpecFieldLogicAppender)
+   Example instruction:
+   add the field logic from <secretWordField.txt> into <<Hangman_spec.json>> for the field <secretWord> %%%)))
 4) generate field delegate via              (OpenAiFieldDelegateGenerator)
+   Example instruction:
+   generate a field delegate from <<Hangman_spec.json>> %%%)))
 5) insert field using                       (ClassFieldCloner preferred) or ClassFieldAdder
 
 Field requirements:
 • NEW field logic must be natural language in < >
 • One field = one pipeline
 • Delegates must be regenerated every field addition
-• **All generated fields in delegate are public — ALWAYS**
+• All generated fields in delegate are public — ALWAYS
 • Cloning is ALWAYS preferred over adding
 
 FIELD BEFORE METHOD RULE:
@@ -198,8 +204,37 @@ Rule 10 — ANGLE BRACKET PROTOCOL
 ────────────────────────────────────────
 
 10a — ALL identifiers must be <wrappedLikeThis>  
+
 10b — A logic file contains ONE <description capsule> only  
+
 10c — ASCII drawings must be described, not drawn  
+
+10d — PARAMETER COVERAGE RULE:
+      For every CLI parameter value shown in a script’s "usage" line
+      (everything inside <...>), there MUST be a corresponding <...>
+      capsule in the natural-language instruction line OR it must be
+      derivable by a strict naming convention defined in this spec.
+
+      Examples:
+      • SpecFieldLogicAppender usage:
+          --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <FieldName>
+        → a valid instruction MUST contain:
+          <SpecFile.json> capsule (e.g. <<Hangman_spec.json>>),
+          <FieldDescription.txt> capsule (e.g. <secretWordField.txt>),
+          <FieldName> capsule (e.g. <secretWord>).
+
+10e — If a parameter is not derivable from another parameter by a
+      documented convention (for example, fieldName from logicFile),
+      it MUST be explicitly present as its own <...> capsule in the
+      instruction. Hidden or implicit parameters are forbidden.
+
+10f — Derivation convention (allowed exception):
+      For field pipelines, <FieldName> MAY be derived automatically
+      from the <FieldDescription.txt> filename IF AND ONLY IF the file
+      name follows the pattern:
+          <FieldName>Field.txt  or  <FieldName>_field.txt
+      In that case, the system may infer <FieldName> when the capsule
+      is missing — but best practice is to still include it explicitly.
 
 
 Rule 11 — Required libs BEFORE cloning:
@@ -220,16 +255,16 @@ Rule 14 — After every clone/add → regenerate spec JSON.
 EXAMPLE EXECUTION
 ----------------------------------------
 
-create a folder called MATRIX %%%)))
-set the current working directory to be MATRIX %%%)))
+create a folder called <MATRIX> %%%)))
+set the current working directory to be <MATRIX> %%%)))
 download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
-create a base class called Base %%%)))
-create a spec file for the Base class %%%)))
-create a text file myMethod.txt and the content of it should be <static void main(String[] args) that creates a 3x3 matrix and prints it> %%%)))
-add the logic from myMethod.txt to <Base_spec.json> %%%)))
-generate a delegate from <Base_spec.json> %%%)))
+create a base class called <Base> %%%)))
+create a spec file for the <Base> class %%%)))
+create a text file <myMethod.txt> and the content of it should be <static void main(String[] args) that creates a 3x3 matrix and prints it> %%%)))
+add the logic from <myMethod.txt> to <<Base_spec.json>> %%%)))
+generate a delegate from <<Base_spec.json>> %%%)))
 clone the <main> method from <BaseDelegate> into <Base> %%%)))
-execute the Base class %%%)))
+execute the <Base> class %%%)))
 
 ----------------------------------------
 END OF SPEC
