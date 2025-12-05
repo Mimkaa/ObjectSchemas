@@ -103,6 +103,14 @@ Notes:
 • main() may only be inserted if deps exist
 • ClassMethodCloner is default insertion tool
 
+HARD FIELD-ORDER CONSTRAINT (METHODS):
+• Any method that reads or writes a field <F> MAY ONLY be created
+  after <F> exists in the base class / spec.
+• That means: run the full FIELD CREATION PIPELINE for every new field
+  BEFORE running a METHOD CREATION PIPELINE that uses that field.
+• newMethodLogicSpec MUST NOT describe logic that accesses fields
+  which are not present in the latest spec JSON.
+
 
 ────────────────────────────────────────
 Rule 3.5 — FIELD CREATION PIPELINE  (Corrected)
@@ -121,7 +129,14 @@ Field requirements:
 • One field = one pipeline
 • Delegates must be regenerated every field addition
 • **All generated fields in delegate are public — ALWAYS**
-• Cloning is ALWAYS preferred over adding 
+• Cloning is ALWAYS preferred over adding
+
+FIELD BEFORE METHOD RULE:
+• For every field <F> that will be used in a method, this pipeline
+  MUST be completed (including clone/add into base) BEFORE any method
+  pipeline describes logic that uses <F>.
+• Never generate methods that rely on fields which do not yet exist
+  in the current spec / base class.
 
 
 ────────────────────────────────────────
@@ -136,6 +151,13 @@ Always required for:
 ✔ mixed upgrades
 
 Nothing may bypass delegate generation.
+
+ORDERING INSIDE THIS PATH:
+• For new fields:
+    FIELD pipeline first → updated delegate → clone/add to base.
+• For methods that use those fields:
+    Only after the field pipeline is complete, run the METHOD pipeline
+    and clone/add methods.
 
 
 Rule 4 — Editing existing methods:
@@ -160,6 +182,11 @@ Rule 8 — Delegates ALWAYS named:
 
 Rule 9 — Dependency rule:
 If A calls B → B must exist before A is inserted.
+
+FIELD–METHOD DEPENDENCY EXTENSION:
+• If a method <M> uses a field <F>, then <F> must already exist
+  (created + cloned/added into the base and reflected in the latest spec)
+  BEFORE the method pipeline for <M> is executed.
 
 
 ────────────────────────────────────────
