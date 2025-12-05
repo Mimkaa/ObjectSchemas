@@ -9,11 +9,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Command-line tool:
+ * Command-line tool (METHODS):
  *
- *   java OpenAiDelegateGenerator Base_spec.json
+ *   java OpenAiMethodDelegateGenerator Base_spec.json
  *   or
- *   java OpenAiDelegateGenerator --Target_spec Base_spec.json
+ *   java OpenAiMethodDelegateGenerator --Target_spec Base_spec.json
  *
  * Requires:
  *   - Java 11+
@@ -22,14 +22,12 @@ import java.nio.file.Paths;
  * Effect:
  *   - Reads <Target>_spec.json
  *   - Asks OpenAI (GPT-5.1) to generate a delegate class
- *   - Delegate may include NEW FIELDS, NEW METHODS, or BOTH
+ *   - Delegate may include NEW METHODS that use existing/public fields
  *   - Writes <TargetSimpleName>Delegate.java and compiles it automatically
  */
-public class OpenAiDelegateGenerator {
+public class OpenAiMethodDelegateGenerator {
 
     private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-
-    // Upgraded model
     private static final String MODEL = "gpt-5.1";
 
     private final String apiKey;
@@ -50,7 +48,7 @@ public class OpenAiDelegateGenerator {
         }
         """;
 
-    public OpenAiDelegateGenerator() {
+    public OpenAiMethodDelegateGenerator() {
         this.apiKey = System.getenv("OPENAI_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException("OPENAI_API_KEY environment variable missing");
@@ -77,18 +75,18 @@ public class OpenAiDelegateGenerator {
         if (specFile == null) {
             System.err.println("""
                 Usage:
-                  java OpenAiDelegateGenerator <spec.json>
+                  java OpenAiMethodDelegateGenerator <spec.json>
                   or
-                  java OpenAiDelegateGenerator --Target_spec <spec.json>
+                  java OpenAiMethodDelegateGenerator --Target_spec <spec.json>
                 """);
             System.exit(1);
         }
 
         try {
-            Path out = new OpenAiDelegateGenerator().generateDelegateFile(Paths.get(specFile));
-            System.out.println("\n✔ Delegate generated → " + out.toAbsolutePath());
+            Path out = new OpenAiMethodDelegateGenerator().generateDelegateFile(Paths.get(specFile));
+            System.out.println("\n✔ Method delegate generated → " + out.toAbsolutePath());
         } catch (Exception e) {
-            System.err.println("\n❌ Error during delegate creation:");
+            System.err.println("\n❌ Error during method delegate creation:");
             e.printStackTrace();
         }
     }
@@ -114,7 +112,7 @@ public class OpenAiDelegateGenerator {
 
         Files.writeString(out, javaSource, StandardCharsets.UTF_8);
 
-        System.out.println("\n===== GENERATED DELEGATE SOURCE =====\n" + javaSource + "\n===== END =====");
+        System.out.println("\n===== GENERATED METHOD DELEGATE SOURCE =====\n" + javaSource + "\n===== END =====");
 
         compile(out);
         return out;
@@ -144,7 +142,7 @@ public class OpenAiDelegateGenerator {
     }
 
     // =====================================================================
-    // OPENAI REQUEST → DELEGATE JAVA CLASS
+    // OPENAI REQUEST → METHOD-FOCUSED DELEGATE
     // =====================================================================
     private String generateDelegateSource(String delegateName,
                                           String parentName,
@@ -180,30 +178,16 @@ public class OpenAiDelegateGenerator {
             Do NOT omit or change 'extends %s'.
             No extra classes, no outer wrappers, no markdown.
 
-            FIELD GENERATION RULES (CRITICAL)
-            ---------------------------------
-            1) All NEW fields that are meant to be transferred (cloned into the base)
-               come from newFieldDescSpec.
-
-               For EACH entry (fieldName → description) in newFieldDescSpec:
-                 • Declare a field with EXACTLY that fieldName.
-                 • Infer its type from the description text.
-                 • The field MUST be declared as PUBLIC.
-                     Example:
-                         public java.util.ArrayList<String> stringList;
-                         public String extraString;
-
-            2) Do NOT re-declare fields already present in the "fields" array of the spec.
-               Only add truly NEW fields requested in newFieldDescSpec.
-
-            3) If newFieldDescSpec is present and non-empty but newMethodLogicSpec is
-               missing or empty, you MUST generate a delegate that ONLY contains:
-                 • the public fields based on newFieldDescSpec
-                 • and NO methods.
-
-            4) If BOTH newFieldDescSpec and newMethodLogicSpec exist, then:
-                 • All fields created from newFieldDescSpec MUST be public.
-                 • Methods are allowed (see method rules below).
+            FIELD USAGE CONTEXT
+            -------------------
+            • Any NEW fields that exist in newFieldDescSpec have already been handled
+              by a separate field generator. Assume they are (or will be) present
+              as public fields, and you ARE allowed to use them.
+            • You MUST NOT declare new fields here that duplicate fields created
+              in the field pipeline. This generator should focus on METHODS.
+            • Only declare a NEW field if the description clearly requires brand-new
+              state that is NOT already captured by any field listed in the spec or
+              newFieldDescSpec. In most cases you should NOT declare new fields.
 
             STATE & FIELD USAGE RULES (VERY IMPORTANT)
             -----------------------------------------
@@ -214,7 +198,7 @@ public class OpenAiDelegateGenerator {
 
             • If a suitable field already exists in:
                 - non-private entries in the "fields" array, OR
-                - any public field declared from newFieldDescSpec,
+                - any public field from newFieldDescSpec,
               then the method MUST use that field instead of introducing a new local
               variable for the same concept.
 
@@ -257,8 +241,7 @@ public class OpenAiDelegateGenerator {
                    and declare the method as public.
 
             3) Methods may read and write the following fields:
-                 • Any public fields you declared from newFieldDescSpec
-                   (for example: stringList, extraString).
+                 • Any public fields from newFieldDescSpec.
                  • Any existing fields from the "fields" array that are
                    NOT marked as private (i.e. no 'private' modifier there).
 
@@ -273,49 +256,20 @@ public class OpenAiDelegateGenerator {
             METHOD CALL RESTRICTION RULE (CRITICAL)
             ---------------------------------------
             • A generated method may ONLY call:
-                 1) Methods listed in the \"methods\" array of the spec, OR
+                 1) Methods listed in the "methods" array of the spec, OR
                  2) Methods that you are generating from newMethodLogicSpec in the
                     same delegate, OR
                  3) Methods inherited from java.lang.Object (toString, equals, etc.).
 
             • It is STRICTLY FORBIDDEN to invent or call helper methods that do not
-              exist in the spec or in newMethodLogicSpec. Examples of forbidden calls:
-                 - displayCurrentState()
-                 - processGuess(...)
-                 - update(...)
-                 - compute(...)
-              unless these exact methods appear in the provided method list or
-              in newMethodLogicSpec.
+              exist in the spec or in newMethodLogicSpec.             
 
             • If the description requires extra steps, you MUST write the necessary
               logic inline inside the method body instead of calling imaginary
               helper functions.
 
-            4) Methods must follow the semantics of the description exactly.
-               For example, for:
-
-                 "a non static method named addAndPrint with no parameters and no
-                  return value that does the following steps in order:
-                    first ensure that the stringList field is initialized by checking
-                    if it is null and if so creating a new java.util.ArrayList<String>
-                    and assigning it to stringList, then add the extraString field value
-                    to the stringList list, then iterate over all elements of stringList
-                    in insertion order and print each element on its own line using
-                    System.out.println"
-
-               you should generate something along the lines of:
-
-                 public void addAndPrint() {
-                     if (this.stringList == null) {
-                         this.stringList = new java.util.ArrayList<String>();
-                     }
-                     this.stringList.add(this.extraString);
-                     for (String s : this.stringList) {
-                         System.out.println(s);
-                     }
-                 }
-
-               (using public fields generated from newFieldDescSpec).
+            4) Methods must follow the semantics of the description exactly,
+               and the resulting class MUST be 100%% valid, compilable Java code.
 
             5) Methods may be instance or static depending on the description.
                If not specified, prefer instance methods (non-static).
@@ -394,9 +348,6 @@ public class OpenAiDelegateGenerator {
                 .replace("\n", "\\n") + '"';
     }
 
-    // =====================================================================
-    // COMPILE RESULT
-    // =====================================================================
     private void compile(Path file) throws IOException, InterruptedException {
         System.out.println("\nCompiling " + file.getFileName());
 
