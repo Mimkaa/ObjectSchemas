@@ -37,31 +37,63 @@ MAX_DESCRIPTION_LENGTH = 1024
 scripts_to_add = [
     {
         "description": (
-            "Appends method logic from a text file into an existing spec JSON file. Use this script when you want "
-            "to extend a class specification with new method bodies, behavioral instructions, or implementation "
-            "details provided in plain text. Typical natural language prompts that should map to this script include: "
-            "\"add logic to this spec\", \"append this method body\", \"insert method logic from a text file\", "
-            "\"extend the spec with this implementation\", \"merge this logic into the method entry\", "
-            "\"inject method behavior into the spec\", or \"import method code into the spec file\". "
-            "This script is part of STECHEN’s declarative workflow, enabling method implementations to be added "
-            "before generating delegates or performing bytecode-level modifications."
+            "Generates a delegate class that contains ONLY public fields defined in the spec JSON, using OpenAI. "
+            "Use this script in the FIELD CREATION pipeline after you have appended new field descriptions into "
+            "newFieldDescSpec (via SpecFieldLogicAppender). It reads the spec file, asks the OpenAI API to produce "
+            "a <BaseClassName>Delegate that extends the original base class, and declares all requested fields as "
+            "public so they can be cloned into the base using ClassFieldCloner. Typical natural language prompts "
+            "that should map to this script include: \"generate a delegate with the new fields\", "
+            "\"create a field-only delegate from this spec\", \"build a delegate that exposes the fields for "
+            "cloning\", \"turn the field descriptions in the spec into a delegate class\", or "
+            "\"produce a delegate so I can clone these fields into the base class\". This tool is the AI-powered "
+            "step that materializes declarative field descriptions into an actual Java delegate, ready for "
+            "bytecode-level transfer."
         )[:MAX_DESCRIPTION_LENGTH],
 
         "metadata": {
-            "script_name": "SpecMethodLogicAppender",
+            "script_name": "OpenAiFieldDelegateGenerator",
 
             "usage": (
-                "java SpecMethodLogicAppender "
-                "--specFile <YourSpecFile.json> "
-                "--logicFile <YourLogicFile.txt>"
+                "java OpenAiFieldDelegateGenerator "
+                "<Target_spec.json>"
             ),
 
             "description": (
-                "Appends method logic from a text file into a spec file."
+                "Uses OpenAI to generate a field-only delegate class from a spec JSON (public fields for cloning)."
+            )
+        }
+    },
+    {
+        "description": (
+            "Generates a delegate class containing NEW METHODS based on natural-language method logic stored in the "
+            "spec JSON (newMethodLogicSpec), using OpenAI. Use this script in the METHOD CREATION pipeline after "
+            "you have appended method descriptions via SpecMethodLogicAppender. It reads the spec, calls the OpenAI "
+            "API, and produces a <BaseClassName>Delegate that extends the original base class and implements the "
+            "described methods as real Java code. The generated methods are required to be public (unless otherwise "
+            "stated), to follow the semantics of the description, and to use existing/public fields whenever state "
+            "needs to be stored or updated. Typical natural language prompts that should map to this script include: "
+            "\"generate a delegate with this method logic\", \"create a delegate that implements these methods\", "
+            "\"turn the method descriptions in the spec into Java code\", \"build a delegate so I can clone these "
+            "methods into the base class\", or \"use AI to materialize this behavior in a delegate class\". This "
+            "tool is the AI-powered METHOD generator in STECHEN, producing compilable Java delegates ready for "
+            "ClassMethodCloner or ClassMethodAdder."
+        )[:MAX_DESCRIPTION_LENGTH],
+
+        "metadata": {
+            "script_name": "OpenAiMethodDelegateGenerator",
+
+            "usage": (
+                "java OpenAiMethodDelegateGenerator "
+                "<Target_spec.json>"
+            ),
+
+            "description": (
+                "Uses OpenAI to generate a method-focused delegate class from a spec JSON (methods for cloning)."
             )
         }
     }
 ]
+
 
 
 

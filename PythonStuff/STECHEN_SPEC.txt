@@ -54,9 +54,13 @@ SpecFieldLogicAppender
 description: appends a NEW FIELD description inside "newFieldDescSpec" section of a spec JSON
 usage: java SpecFieldLogicAppender --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <nameOfField>
 
-OpenAiDelegateGenerator
-description: generates a delegate class from a spec JSON using AI
-usage: java OpenAiDelegateGenerator <Target_spec.json>
+OpenAiFieldDelegateGenerator
+description: generates a field-only delegate class from a spec JSON using AI (public fields for cloning)
+usage: java OpenAiFieldDelegateGenerator <Target_spec.json>
+
+OpenAiMethodDelegateGenerator
+description: generates a method-focused delegate class from a spec JSON using AI (methods for cloning)
+usage: java OpenAiMethodDelegateGenerator <Target_spec.json>
 
 ClassMethodAdder
 description: copies all methods from delegate into target class
@@ -93,7 +97,7 @@ Rule 3 — METHOD CREATION PIPELINE
 1) create or update spec file              (ClassToSpecJsonFile)
 2) write logic into a txt file             (CreateTextFile)
 3) append method logic using               (SpecMethodLogicAppender)
-4) generate delegate                       (OpenAiDelegateGenerator)
+4) generate method delegate                (OpenAiMethodDelegateGenerator)
 5) insert method using                     (ClassMethodCloner preferred) or ClassMethodAdder
 
 Notes:
@@ -116,12 +120,12 @@ HARD FIELD-ORDER CONSTRAINT (METHODS):
 Rule 3.5 — FIELD CREATION PIPELINE  (Corrected)
 ────────────────────────────────────────
 
-Field creation mirrors method creation — only appender + step 5 change.
+Field creation mirrors method creation — only appender + delegate + step 5 change.
 
 1) create or update spec JSON using         (ClassToSpecJsonFile)
 2) write field description to <field>.txt   (CreateTextFile)
 3) append field into spec using             (SpecFieldLogicAppender)  <-- replaces Method appender
-4) generate delegate via                    (OpenAiDelegateGenerator)
+4) generate field delegate via              (OpenAiFieldDelegateGenerator)
 5) insert field using                       (ClassFieldCloner preferred) or ClassFieldAdder
 
 Field requirements:
@@ -146,18 +150,18 @@ Rule 3.6 — UNIFIED DELEGATE PATH (MUST FOLLOW)
 Spec → Delegate → Clone/Add → Base
 
 Always required for:
-✔ new methods
-✔ new fields
+✔ new methods  (delegate from OpenAiMethodDelegateGenerator)
+✔ new fields   (delegate from OpenAiFieldDelegateGenerator)
 ✔ mixed upgrades
 
 Nothing may bypass delegate generation.
 
 ORDERING INSIDE THIS PATH:
 • For new fields:
-    FIELD pipeline first → updated delegate → clone/add to base.
+    FIELD pipeline first → field delegate → clone/add to base.
 • For methods that use those fields:
     Only after the field pipeline is complete, run the METHOD pipeline
-    and clone/add methods.
+    with a method delegate and clone/add methods.
 
 
 Rule 4 — Editing existing methods:

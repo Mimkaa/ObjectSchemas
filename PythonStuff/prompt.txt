@@ -1,76 +1,93 @@
-create a folder called HANGMAN %%%)))
-set the current working directory to be HANGMAN %%%)))
+create a folder called <HANGMAN> %%%)))
+set the current working directory to be <HANGMAN> %%%)))
 download the library called <net.bytebuddy:byte-buddy:1.15.3> %%%)))
 download the library called <org.ow2.asm:asm:9.8> %%%)))
 download the library called <org.ow2.asm:asm-tree:9.8> %%%)))
 create a base class called <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <secretWordField.txt> and the content of it should be <<a private String field named secretWord that stores the word the player is trying to guess>> %%%)))
-add the field logic from <secretWordField.txt> into <Hangman_spec.json> with the field name <secretWord> %%%)))
+create a text file <secretWordField.txt> and the content of it should be <<a public String field named <secretWord> that stores the word the player is trying to guess>> %%%)))
+add the field logic from <secretWordField.txt> into the spec file <Hangman_spec.json> for the field named <secretWord> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <secretWord> from <HangmanDelegate> into <Hangman> %%%)))
+clone the <secretWord> field from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <guessedLettersField.txt> and the content of it should be <<a private StringBuilder field named guessedLetters that stores all letters the player has already guessed in the order they were entered>> %%%)))
-add the field logic from <guessedLettersField.txt> into <Hangman_spec.json> with the field name <guessedLetters> %%%)))
+create a text file <guessedLettersField.txt> and the content of it should be <<a public String field named <guessedLetters> that stores all letters the player has already guessed, concatenated together in order of guessing>> %%%)))
+add the field logic from <guessedLettersField.txt> into the spec file <Hangman_spec.json> for the field named <guessedLetters> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <guessedLetters> from <HangmanDelegate> into <Hangman> %%%)))
+clone the <guessedLetters> field from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <remainingAttemptsField.txt> and the content of it should be <<a private int field named remainingAttempts that tracks how many incorrect guesses the player can still make before losing the game>> %%%)))
-add the field logic from <remainingAttemptsField.txt> into <Hangman_spec.json> with the field name <remainingAttempts> %%%)))
+create a text file <remainingAttemptsField.txt> and the content of it should be <<a public int field named <remainingAttempts> that stores how many incorrect guesses the player can still make before losing the game>> %%%)))
+add the field logic from <remainingAttemptsField.txt> into the spec file <Hangman_spec.json> for the field named <remainingAttempts> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <remainingAttempts> from <HangmanDelegate> into <Hangman> %%%)))
+clone the <remainingAttempts> field from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <maxAttemptsField.txt> and the content of it should be <<a private int field named maxAttempts that stores the maximum number of incorrect guesses allowed for a game, used to initialize remainingAttempts and for display purposes>> %%%)))
-add the field logic from <maxAttemptsField.txt> into <Hangman_spec.json> with the field name <maxAttempts> %%%)))
+create a text file <gameOverField.txt> and the content of it should be <<a public boolean field named <gameOver> that is true when the game has ended either by winning or losing, and false while the game is still in progress>> %%%)))
+add the field logic from <gameOverField.txt> into the spec file <Hangman_spec.json> for the field named <gameOver> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <maxAttempts> from <HangmanDelegate> into <Hangman> %%%)))
+clone the <gameOver> field from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <currentStateField.txt> and the content of it should be <<a private char array field named currentState that represents the current visible state of the secret word, where correctly guessed letters are shown and unknown letters are represented by underscores>> %%%)))
-add the field logic from <currentStateField.txt> into <Hangman_spec.json> with the field name <currentState> %%%)))
-generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <currentState> from <HangmanDelegate> into <Hangman> %%%)))
-create a spec file for the <Hangman> class %%%)))
-create a text file <gameOverField.txt> and the content of it should be <<a private boolean field named gameOver that is true when the game has ended either by winning or losing and false while the game is still in progress>> %%%)))
-add the field logic from <gameOverField.txt> into <Hangman_spec.json> with the field name <gameOver> %%%)))
-generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <gameOver> from <HangmanDelegate> into <Hangman> %%%)))
-create a spec file for the <Hangman> class %%%)))
-create a text file <wonField.txt> and the content of it should be <<a private boolean field named won that is true if the player has successfully guessed the secret word and false otherwise>> %%%)))
-add the field logic from <wonField.txt> into <Hangman_spec.json> with the field name <won> %%%)))
-generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <won> from <HangmanDelegate> into <Hangman> %%%)))
-create a spec file for the <Hangman> class %%%)))
-create a text file <scannerField.txt> and the content of it should be <<a private java.util.Scanner field named scanner that is used to read user input from System.in during the hangman game>> %%%)))
-add the field logic from <scannerField.txt> into <Hangman_spec.json> with the field name <scanner> %%%)))
-generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <scanner> from <HangmanDelegate> into <Hangman> %%%)))
-create a spec file for the <Hangman> class %%%)))
-create a text file <wordListField.txt> and the content of it should be <<a private String array field named wordList that contains a small list of possible secret words for the hangman game such as "computer", "java", "hangman", "programming", and "keyboard">> %%%)))
-add the field logic from <wordListField.txt> into <Hangman_spec.json> with the field name <wordList> %%%)))
-generate a delegate from <Hangman_spec.json> %%%)))
-clone the field <wordList> from <HangmanDelegate> into <Hangman> %%%)))
-create a spec file for the <Hangman> class %%%)))
-create a text file <initializeGameMethod.txt> and the content of it should be <<a public void method named initializeGame that sets up a new hangman game by performing the following steps in order: 1) if scanner is null then create a new java.util.Scanner reading from System.in and assign it to scanner; 2) if wordList is null or has length 0 then initialize wordList with a few default words such as "computer", "java", "hangman", "programming", and "keyboard"; 3) choose a random index between 0 (inclusive) and wordList.length (exclusive) using java.util.Random and assign the word at that index to secretWord; 4) set maxAttempts to 8; 5) set remainingAttempts to maxAttempts; 6) create a new char array currentState with the same length as secretWord and fill it with underscore characters '_'; 7) create a new StringBuilder and assign it to guessedLetters; 8) set gameOver to false; 9) set won to false; 10) print a welcome message like "Welcome to Hangman!" and then print how many letters the secret word has and how many attempts the player has>> %%%)))
+create a text file <initializeGameMethod.txt> and the content of it should be <<a public void method named <initializeGame> with no parameters that initializes a new hangman game by performing the following steps in order: 
+1) set <secretWord> to a randomly chosen word from a small built-in list of lowercase words such as <java>, <hangman>, <computer>, and <program>. use java.util.Random to pick an index into the list. 
+2) set <guessedLetters> to an empty String. 
+3) set <remainingAttempts> to 6 so the player has six incorrect guesses available. 
+4) set <gameOver> to false.>> %%%)))
 add the logic from <initializeGameMethod.txt> to <Hangman_spec.json> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
 clone the <initializeGame> method from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <displayCurrentStateMethod.txt> and the content of it should be <<a private void method named displayCurrentState that prints the current visible state of the secret word and the letters already guessed by the player; the method should first print a line like "Word: " followed by the characters in currentState separated by spaces, then print a newline, then print a line like "Guessed letters: " followed by the contents of guessedLetters or "(none)" if no letters have been guessed yet, then print another line showing "Remaining attempts: " followed by remainingAttempts>> %%%)))
-add the logic from <displayCurrentStateMethod.txt> to <Hangman_spec.json> %%%)))
+create a text file <getMaskedWordMethod.txt> and the content of it should be <<a public String method named <getMaskedWord> with no parameters that returns a masked representation of <secretWord> based on the letters in <guessedLetters>. the method should:
+1) create a StringBuilder. 
+2) for each character in <secretWord>, check if that character appears anywhere in <guessedLetters>. 
+3) if the character has been guessed, append the character itself to the StringBuilder. 
+4) if the character has not been guessed, append an underscore character '_' instead. 
+5) after processing all characters, convert the StringBuilder to a String and return it.>> %%%)))
+add the logic from <getMaskedWordMethod.txt> to <Hangman_spec.json> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the <displayCurrentState> method from <HangmanDelegate> into <Hangman> %%%)))
+clone the <getMaskedWord> method from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <processGuessMethod.txt> and the content of it should be <<a private void method named processGuess that takes a single char parameter named guess and updates the game state based on that guess; the method should: 1) convert guess to lowercase; 2) if guessedLetters already contains this character then print a message like "You already guessed that letter." and return without changing attempts; 3) append the guess and a space to guessedLetters; 4) check if secretWord contains the guessed character; if it does, loop over all positions in secretWord and for each index where the character matches guess, set currentState at that index to that character, then print a message like "Good guess!"; 5) if secretWord does not contain the guessed character, decrement remainingAttempts by 1 and print a message like "Wrong guess."; 6) after updating, check if there are no more underscores in currentState; if there are none, set gameOver to true, set won to true, and print a congratulatory message including the secretWord; 7) if remainingAttempts is less than or equal to 0 and won is still false, set gameOver to true and print a message that the player has lost and reveal the secretWord>> %%%)))
+create a text file <isWordGuessedMethod.txt> and the content of it should be <<a public boolean method named <isWordGuessed> with no parameters that returns true if the player has successfully guessed all letters in <secretWord>, and false otherwise. the method should:
+1) call <getMaskedWord> to obtain the current masked word. 
+2) compare the masked word to <secretWord> using String equality. 
+3) if they are equal, return true, otherwise return false.>> %%%)))
+add the logic from <isWordGuessedMethod.txt> to <Hangman_spec.json> %%%)))
+generate a delegate from <Hangman_spec.json> %%%)))
+clone the <isWordGuessed> method from <HangmanDelegate> into <Hangman> %%%)))
+create a spec file for the <Hangman> class %%%)))
+create a text file <processGuessMethod.txt> and the content of it should be <<a public void method named <processGuess> that takes a single parameter <char guess>. this method processes one letter guess from the player and updates the game state fields. the method should:
+1) if <gameOver> is true, immediately return without doing anything. 
+2) convert <guess> to lowercase. 
+3) if <guessedLetters> already contains this lowercase character, simply return without changing attempts or state. 
+4) otherwise, append the lowercase character to <guessedLetters>. 
+5) check if <secretWord> contains the guessed character. 
+6) if <secretWord> does not contain the guessed character, decrement <remainingAttempts> by 1. 
+7) after updating attempts, if <isWordGuessed> returns true, set <gameOver> to true. 
+8) else if <remainingAttempts> is less than or equal to 0, set <gameOver> to true as well.>> %%%)))
 add the logic from <processGuessMethod.txt> to <Hangman_spec.json> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
 clone the <processGuess> method from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <gameLoopMethod.txt> and the content of it should be <<a private void method named gameLoop that repeatedly asks the player for letter guesses until the game is over; the method should run a while loop that continues while gameOver is false; inside the loop it should: 1) call displayCurrentState; 2) prompt the user with a line like "Enter a letter: "; 3) read a full line from scanner, trim it, and if the line is empty then print "Please enter a letter." and continue to the next iteration; 4) take the first character of the line as the guess; 5) if the character is not a letter (use Character.isLetter) then print "Please enter a valid letter." and continue; 6) call processGuess with that character; 7) after the loop ends, print a final line like "Game over." and then if won is true print "You won!" otherwise print "You lost." along with the secretWord>> %%%)))
-add the logic from <gameLoopMethod.txt> to <Hangman_spec.json> %%%)))
+create a text file <printGameStateMethod.txt> and the content of it should be <<a public void method named <printGameState> with no parameters that prints the current state of the game to System.out. the method should:
+1) print a line that shows the masked word by calling <getMaskedWord>, prefixed with the text <Word: >. 
+2) print a line that shows the letters guessed so far in <guessedLetters>, prefixed with the text <Guessed letters: >. 
+3) print a line that shows the number of remaining attempts from <remainingAttempts>, prefixed with the text <Remaining attempts: >. 
+4) if <gameOver> is true and <isWordGuessed> returns true, print a line saying <You won! The word was: > followed by <secretWord>. 
+5) else if <gameOver> is true and <isWordGuessed> returns false, print a line saying <You lost! The word was: > followed by <secretWord>.>> %%%)))
+add the logic from <printGameStateMethod.txt> to <Hangman_spec.json> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
-clone the <gameLoop> method from <HangmanDelegate> into <Hangman> %%%)))
+clone the <printGameState> method from <HangmanDelegate> into <Hangman> %%%)))
 create a spec file for the <Hangman> class %%%)))
-create a text file <mainMethod.txt> and the content of it should be <<a public static void main method with signature public static void main(String[] args) that creates and runs a hangman game; inside main, create a new instance of Hangman, call its initializeGame method, then call its gameLoop method; after the game finishes, close the scanner field if it is not null; wrap the game logic in a try block and in a finally block ensure that the scanner is closed if it was created>> %%%)))
+create a text file <mainMethod.txt> and the content of it should be <<a public static void method named <main> with parameter <String[] args> that runs the hangman game in the console. the method should:
+1) create a new instance of <Hangman> and store it in a local variable. 
+2) call <initializeGame> on that instance. 
+3) create a java.util.Scanner that reads from System.in. 
+4) in a loop that continues while the instance field <gameOver> is false, do the following steps: 
+   a) call <printGameState> on the instance. 
+   b) print a prompt line such as <Enter a letter: >. 
+   c) read a line of input from the scanner. 
+   d) if the line is empty, continue the loop without processing. 
+   e) otherwise, take the first character of the line as the guess. 
+   f) call <processGuess> on the instance with that character. 
+5) after the loop ends, call <printGameState> one final time so the player sees the final result. 
+6) close the Scanner.>> %%%)))
 add the logic from <mainMethod.txt> to <Hangman_spec.json> %%%)))
 generate a delegate from <Hangman_spec.json> %%%)))
 clone the <main> method from <HangmanDelegate> into <Hangman> %%%)))
