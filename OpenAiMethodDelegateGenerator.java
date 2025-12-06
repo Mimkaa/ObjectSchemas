@@ -11,8 +11,6 @@ import java.nio.file.Paths;
 /**
  * Command-line tool (METHODS):
  *
- *   java OpenAiMethodDelegateGenerator Base_spec.json
- *   or
  *   java OpenAiMethodDelegateGenerator --Target_spec Base_spec.json
  *
  * Requires:
@@ -62,21 +60,17 @@ public class OpenAiMethodDelegateGenerator {
     public static void main(String[] args) {
         String specFile = null;
 
-        if (args.length == 1 && !args[0].startsWith("--")) {
-            specFile = args[0];
-        } else {
-            for (int i = 0; i < args.length; i++) {
-                if ("--Target_spec".equals(args[i]) && i + 1 < args.length) {
-                    specFile = args[++i];
-                }
+        // Strict flag-based parsing: --Target_spec <spec.json>
+        for (int i = 0; i < args.length; i++) {
+            if ("--Target_spec".equals(args[i]) && i + 1 < args.length) {
+                specFile = args[i + 1];
+                break;
             }
         }
 
         if (specFile == null) {
             System.err.println("""
                 Usage:
-                  java OpenAiMethodDelegateGenerator <spec.json>
-                  or
                   java OpenAiMethodDelegateGenerator --Target_spec <spec.json>
                 """);
             System.exit(1);
@@ -88,6 +82,7 @@ public class OpenAiMethodDelegateGenerator {
         } catch (Exception e) {
             System.err.println("\n❌ Error during method delegate creation:");
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
@@ -221,9 +216,30 @@ public class OpenAiMethodDelegateGenerator {
 
             METHOD GENERATION RULES
             -----------------------
-            1) Methods come from newMethodLogicSpec.
+            1) ONE PIPELINE = ONE METHOD.
+               • Assume newMethodLogicSpec contains exactly ONE relevant natural-language
+                 description of a new method for this generation step.
+               • You MUST generate exactly ONE new method that corresponds to that
+                 description and NOTHING ELSE.
+               • You are NOT allowed to invent extra methods (helper methods, utility
+                 methods, or main methods) that are not described in newMethodLogicSpec.
+
+            2) Methods come from newMethodLogicSpec.
                Each value is a natural-language description of one method
                (like "a non static method named addAndPrint ...").
+
+            METHOD BODY COMPLETENESS RULE (VERY IMPORTANT)
+            ----------------------------------------------
+            • For every described method you generate, you MUST provide a NON-EMPTY
+              method body that implements the described behavior.
+            • You MUST NOT generate empty method bodies.
+              The following are FORBIDDEN unless the description explicitly says
+              the method should do nothing:
+                - empty blocks:   public void foo() { }
+                - TODO stubs:     // TODO implement
+                - stubs that only throw: throw new UnsupportedOperationException();
+            • If the description implies behavior, the body MUST contain real,
+              compilable Java logic that follows that behavior.
 
             METHOD VISIBILITY RULE (CRITICAL)
             ---------------------------------
@@ -233,14 +249,20 @@ public class OpenAiMethodDelegateGenerator {
             • Non-public methods (protected/package-private) are only allowed
               if the description explicitly requests that visibility.
 
-            2) You must convert each description into ONE valid Java method:
+            3) You must convert the description into ONE valid Java method:
                  • If the description gives an explicit signature
                      e.g. "static void main(String[] args) that ..."
                      use that exact signature (add 'public' if no access modifier).
                  • Otherwise, infer return type and parameters from the description,
                    and declare the method as public.
 
-            3) Methods may read and write the following fields:
+               IMPORTANT:
+               • You MUST NOT generate a 'main' method unless the natural-language
+                 description explicitly describes a 'main' method. A generic
+                 "entry point" or "example usage" is NOT enough to justify creating
+                 a main method by yourself.
+
+            4) Methods may read and write the following fields:
                  • Any public fields from newFieldDescSpec.
                  • Any existing fields from the "fields" array that are
                    NOT marked as private (i.e. no 'private' modifier there).
@@ -261,17 +283,21 @@ public class OpenAiMethodDelegateGenerator {
                     same delegate, OR
                  3) Methods inherited from java.lang.Object (toString, equals, etc.).
 
-            • It is STRICTLY FORBIDDEN to invent or call helper methods that do not
-              exist in the spec or in newMethodLogicSpec.             
+            • You are NOT allowed to call helper methods that you do NOT also
+              declare and fully implement in this same class.
+            • You are NOT allowed to call methods that are neither:
+                - listed in "methods", nor
+                - described in newMethodLogicSpec, nor
+                - inherited from Object.
 
             • If the description requires extra steps, you MUST write the necessary
               logic inline inside the method body instead of calling imaginary
               helper functions.
 
-            4) Methods must follow the semantics of the description exactly,
+            5) Methods must follow the semantics of the description exactly,
                and the resulting class MUST be 100%% valid, compilable Java code.
 
-            5) Methods may be instance or static depending on the description.
+            6) Methods may be instance or static depending on the description.
                If not specified, prefer instance methods (non-static).
 
             OUTPUT REQUIREMENTS

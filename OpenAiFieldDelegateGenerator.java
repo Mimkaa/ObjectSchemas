@@ -9,11 +9,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Command-line tool (FIELDS ONLY):
+ * Command-line tool (FIELDS):
  *
- *   java OpenAiFieldDelegateGenerator Base_spec.json
- *   or
- *   java OpenAiFieldDelegateGenerator --Target_spec Base_spec.json
+ *     java OpenAiFieldDelegateGenerator --Target_spec Base_spec.json
  *
  * Requires:
  *   - Java 11+
@@ -21,9 +19,10 @@ import java.nio.file.Paths;
  *
  * Effect:
  *   - Reads <Target>_spec.json
- *   - Asks OpenAI (GPT-5.1) to generate a delegate class
- *   - Delegate contains ONLY public fields from newFieldDescSpec (no methods)
- *   - Writes <TargetSimpleName>Delegate.java and compiles it automatically
+ *   - Asks OpenAI (GPT-5.1) to generate a DELEGATE containing ONLY PUBLIC FIELDS
+ *     that correspond to fields listed in the spec or newFieldDescSpec.
+ *
+ *   - Writes <TargetSimpleName>Delegate.java and compiles it automatically.
  */
 public class OpenAiFieldDelegateGenerator {
 
@@ -42,26 +41,22 @@ public class OpenAiFieldDelegateGenerator {
     }
 
     // =====================================================================
-    // MAIN
+    // MAIN — FLAG-ONLY VERSION
     // =====================================================================
     public static void main(String[] args) {
         String specFile = null;
 
-        if (args.length == 1 && !args[0].startsWith("--")) {
-            specFile = args[0];
-        } else {
-            for (int i = 0; i < args.length; i++) {
-                if ("--Target_spec".equals(args[i]) && i + 1 < args.length) {
-                    specFile = args[++i];
-                }
+        // Strict flag-based parsing: --Target_spec <spec.json>
+        for (int i = 0; i < args.length; i++) {
+            if ("--Target_spec".equals(args[i]) && i + 1 < args.length) {
+                specFile = args[i + 1];
+                break;
             }
         }
 
         if (specFile == null) {
             System.err.println("""
                 Usage:
-                  java OpenAiFieldDelegateGenerator <spec.json>
-                  or
                   java OpenAiFieldDelegateGenerator --Target_spec <spec.json>
                 """);
             System.exit(1);
@@ -73,11 +68,12 @@ public class OpenAiFieldDelegateGenerator {
         } catch (Exception e) {
             System.err.println("\n❌ Error during field delegate creation:");
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
     // =====================================================================
-    // CORE GENERATION
+    // CORE GENERATION — BUILD FIELD-ONLY DELEGATE
     // =====================================================================
     public Path generateDelegateFile(Path specPath) throws IOException, InterruptedException {
         String specJson = Files.readString(specPath, StandardCharsets.UTF_8);
@@ -91,20 +87,20 @@ public class OpenAiFieldDelegateGenerator {
 
         String javaSource = generateDelegateSource(delegateName, original, specJson);
 
-        Path out = specPath.getParent() != null ?
-                specPath.getParent().resolve(delegateName + ".java") :
-                Paths.get(delegateName + ".java");
+        Path out = specPath.getParent() != null
+                ? specPath.getParent().resolve(delegateName + ".java")
+                : Paths.get(delegateName + ".java");
 
         Files.writeString(out, javaSource, StandardCharsets.UTF_8);
 
-        System.out.println("\n===== GENERATED FIELD DELEGATE SOURCE =====\n" + javaSource + "\n===== END =====");
+        System.out.println("\n===== GENERATED FIELD DELEGATE =====\n" + javaSource + "\n===== END =====");
 
         compile(out);
         return out;
     }
 
     // =====================================================================
-    // SPEC NAME EXTRACTION
+    // NAME EXTRACTION
     // =====================================================================
     private static String extractTargetSimpleName(String json, String fallback) {
         try {
@@ -127,7 +123,7 @@ public class OpenAiFieldDelegateGenerator {
     }
 
     // =====================================================================
-    // OPENAI REQUEST → FIELDS-ONLY DELEGATE
+    // OPENAI REQUEST — FIELD-ONLY DELEGATE
     // =====================================================================
     private String generateDelegateSource(String delegateName,
                                           String parentName,
@@ -135,76 +131,40 @@ public class OpenAiFieldDelegateGenerator {
             throws IOException, InterruptedException {
 
         String systemPrompt = """
-            You generate ONLY a valid Java delegate class. No explanations.
+            You generate ONLY a valid Java delegate class.
+            The class MUST:
+            - extend the original base class,
+            - contain ONLY public fields,
+            - NO methods,
+            - NO comments,
+            - NO constructors,
+            - NO extra text.
             """;
 
         String userPrompt = """
-            You are given a SPEC describing a Java class structure.
-            The delegate you generate MUST extend the original base class.
+            You are given a SPEC describing a Java class.
+            You must generate a delegate containing ONLY PUBLIC FIELDS.
 
-            The SPEC may contain:
-              - "target"           : fully qualified or simple base class name.
-              - "fields"           : array of existing fields on the base class.
-              - "newFieldDescSpec" : Object mapping fieldName → natural language
-                                     description of a NEW FIELD to add (for transfer).
-
-            CLASS DECLARATION (STRICT)
-            --------------------------
-            You MUST output exactly one class:
-
-                public class %s extends %s {
-                    ...
-                }
-
-            Do NOT change the name.
-            Do NOT omit or change 'extends %s'.
-            No extra classes, no outer wrappers, no markdown.
-
-            FIELD GENERATION RULES (FIELDS-ONLY DELEGATE)
-            ---------------------------------------------
-            1) This generator is for FIELDS ONLY.
-               You MUST NOT generate ANY methods at all.
-               The class body may contain:
-                 • public fields created from newFieldDescSpec
-                 • (optionally) a public no-arg constructor that does nothing,
-                   but no business logic.
-
-            2) All NEW fields that are meant to be transferred (cloned into the base)
-               come from newFieldDescSpec.
-
-               For EACH entry (fieldName → description) in newFieldDescSpec:
-                 • Declare a field with EXACTLY that fieldName.
-                 • Infer its type from the description text.
-                 • The field MUST be declared as PUBLIC.
-                     Example:
-                         public java.util.ArrayList<String> stringList;
-                         public String extraString;
-
-            3) Do NOT re-declare fields already present in the "fields" array of the spec.
-               Only add truly NEW fields requested in newFieldDescSpec.
-
-            4) If newFieldDescSpec is missing, null or empty, you MUST generate a class
-               with an empty body:
-                 public class %s extends %s {
-                 }
-
-            5) No methods, no business logic, no helper functions.
-
-            OUTPUT REQUIREMENTS
-            -------------------
-            • Output ONLY one complete Java class:
+            RULES:
+            • Output exactly one class:
                   public class %s extends %s { ... }
-            • No markdown, no backticks, no commentary, no extra text.
+            • No methods allowed.
+            • Every field must be public.
+            • For each field entry in:
+                - "fields" array
+                - "newFieldDescSpec" object
+              → declare a corresponding PUBLIC FIELD in the delegate.
 
-            RAW SPEC FOR CONTEXT (DO NOT ECHO VERBATIM):
-            --------------------------------------------
+            • Field types:
+                - If type is explicitly known in the spec, use it.
+                - If type is unknown, infer the simplest reasonable type
+                  (String, int, boolean) based on description.
+                - If ambiguous, default to String.
+
+            RAW SPEC (for context only — do NOT echo):
+            ------------------------------------------
             %s
-            """.formatted(
-                delegateName, parentName, parentName,
-                delegateName, parentName,
-                delegateName, parentName,
-                specJson
-        );
+            """.formatted(delegateName, parentName, specJson);
 
         String requestBody = """
         {
@@ -213,7 +173,7 @@ public class OpenAiFieldDelegateGenerator {
             {"role":"system","content":%s},
             {"role":"user","content":%s}
           ],
-          "temperature":0.2
+          "temperature":0.15
         }
         """.formatted(MODEL, toJson(systemPrompt), toJson(userPrompt));
 
@@ -229,18 +189,28 @@ public class OpenAiFieldDelegateGenerator {
             throw new IOException("OpenAI " + resp.statusCode() + " → " + resp.body());
         }
 
-        String body = resp.body();
+        return extractAssistantContent(resp.body()).trim();
+    }
+
+    // =====================================================================
+    // JSON PARSER FOR ASSISTANT OUTPUT
+    // =====================================================================
+    private static String extractAssistantContent(String body) {
         int p = body.indexOf("\"content\":");
         int q = body.indexOf('"', p + 10);
+
         StringBuilder out = new StringBuilder();
         boolean esc = false;
 
         for (int i = q + 1; i < body.length(); i++) {
             char c = body.charAt(i);
+
             if (esc) {
-                if (c == 'n') out.append('\n');
-                else if (c == 't') out.append('\t');
-                else out.append(c);
+                switch (c) {
+                    case 'n' -> out.append('\n');
+                    case 't' -> out.append('\t');
+                    default -> out.append(c);
+                }
                 esc = false;
             } else if (c == '\\') {
                 esc = true;
@@ -250,10 +220,12 @@ public class OpenAiFieldDelegateGenerator {
                 out.append(c);
             }
         }
-
-        return out.toString().trim();
+        return out.toString();
     }
 
+    // =====================================================================
+    // JSON ESCAPE UTILITY
+    // =====================================================================
     private static String toJson(String s) {
         return '"' + s
                 .replace("\\", "\\\\")
@@ -262,7 +234,7 @@ public class OpenAiFieldDelegateGenerator {
     }
 
     // =====================================================================
-    // COMPILE RESULT
+    // COMPILER
     // =====================================================================
     private void compile(Path file) throws IOException, InterruptedException {
         System.out.println("\nCompiling " + file.getFileName());

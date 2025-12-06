@@ -36,7 +36,9 @@ usage: java ClassFieldAdder --classNameToModify <Name> --field fieldName:fieldTy
 
 DynamicClassCreator
 description: creates a new empty base .class file containing a single default method
-usage: java DynamicClassCreator --name <className>
+usage: java Dyn
+
+amicClassCreator --name <className>
 
 DynamicJarLoader
 description: loads an external library by groupId:artifactId:version
@@ -148,6 +150,7 @@ FIELD BEFORE METHOD RULE:
 • Never generate methods that rely on fields which do not yet exist
   in the current spec / base class.
 
+• Do not call methods that were not specified in the delegate inside of the class that is being created
 
 ────────────────────────────────────────
 Rule 3.6 — UNIFIED DELEGATE PATH (MUST FOLLOW)
