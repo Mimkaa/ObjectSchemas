@@ -16,6 +16,7 @@ At the very beginning of EVERY STECHEN workflow, it is COMPULSORY to:
     1) Create a new project folder
     2) Set that folder as the current working directory
     3) Download all required bytecode-manipulation libraries
+    4) Download the JSON library
 
 That sequence is:
 
@@ -24,13 +25,13 @@ That sequence is:
     java DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
     java DynamicJarLoader --library org.ow2.asm:asm:9.8
     java DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
+    java DynamicJarLoader --library org.json:json:20231013
 
-Only AFTER these 3 steps may any field or method pipeline begin.
+Only AFTER these 4 steps may any field or method pipeline begin.
 
 
 AVAILABLE SCRIPTS (FULL LIST)
 -----------------------------
-
 CreateDirectory
 description: creates a directory with the given name
 usage: java CreateDirectory --name <directoryName>
@@ -40,11 +41,11 @@ description: sets the current working directory to be the specified folder
 usage: java CurrentDirUpdate --dirname <directoryName>
 
 CreateTextFile
-description: creates a text file and optionally inserts content into it
+description: creates a text file with optional content
 usage: java CreateTextFile --name <fileName> [--path <targetPath>] [--content <textContent>]
 
 GitFolderDownloader
-description: rebases or updates the core driving scripts in a folder
+description: updates or rebases core STECHEN scripts
 usage: java GitFolderDownloader --name <folderName>
 
 RunClass
@@ -52,15 +53,15 @@ description: executes a compiled Java class (calls main)
 usage: java RunClass --class <ClassName>
 
 ClassFieldAdder
-description: adds a field definition to an existing .class file
-usage: java ClassFieldAdder --classNameToModify <Name> --field fieldName:fieldType
+description: dynamically adds a field to an existing class
+usage: java ClassFieldAdder --classNameToModify <FullyQualifiedName> --field fieldName:fieldType[:initialValue]
 
 DynamicClassCreator
-description: creates a minimal base .class with default String name + sayHello()
+description: creates a minimal base class with default String name and sayHello()
 usage: java DynamicClassCreator --name <className>
 
 DynamicJarLoader
-description: loads an external library by groupId:artifactId:version
+description: loads an external library using groupId:artifactId:version
 usage: java DynamicJarLoader --library <groupId:artifactId:version>
 
 ClassToSpecJsonFile
@@ -68,12 +69,12 @@ description: generates a spec JSON file listing all fields + methods of a class
 usage: java ClassToSpecJsonFile --targetFile <YourClass.class>
 
 SpecMethodLogicAppender
-description: appends logic from a txt file into newMethodLogicSpec of a spec JSON
+description: appends method logic from a txt file into newMethodLogicSpec
 usage: java SpecMethodLogicAppender --specFile <SpecFile.json> --logicFile <MethodLogicFile.txt>
 
 SpecFieldLogicAppender
-description: appends NEW FIELD description into newFieldDescSpec
-usage: java SpecFieldLogicAppender --specFile <SpecFile.json> --logicFile <FieldDescription.txt> --fieldName <FieldName>
+description: appends a NEW FIELD description into newFieldDescSpec
+usage: java SpecFieldLogicAppender --specFile <Spec.json> --logicFile <FieldDesc.txt> --fieldName <FieldName>
 
 OpenAiFieldDelegateGenerator
 description: generates a field-only delegate class from a spec JSON
@@ -85,49 +86,43 @@ usage: java OpenAiMethodDelegateGenerator --Target_spec <SpecFile.json>
 
 ClassMethodAdder
 description: copies all methods from delegate into target class
-usage: java ClassMethodAdder --classNameToModify <Name> --delegateclass <Delegate>
+usage: java ClassMethodAdder --classNameToModify <FullyQualifiedName> --delegateclass <Delegate>
 
 ClassMethodCloner
-description: clones ONE method bytecode from delegate → target class
-usage: java ClassMethodCloner --classNameToModify <Class> --delegateclass <Delegate> --method <methodName>
+description: clones ONE method bytecode from delegate into target class
+usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassMethodCloner --classNameToModify <FullyQualifiedName> --delegateclass <Delegate> --method <methodName>
+
+ClassMethodMapper
+description: maps selected delegate methods into the target class
+usage: java ClassMethodMapper --classNameToModify <FullyQualifiedName> --delegateclass <Delegate> --mapping <methodA:methodB,...>
 
 JarClassExtractor
-description: extracts classes from jar files
+description: extracts classes from one or more JAR files into matching package structure
 usage: java JarClassExtractor --jar <jar1> [--jar <jar2> ...] [--target <outputDirectory>]
 
 ClassFieldCloner
-description: clones ONE public field from delegate → base class
-usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <BaseClass> --delegateclass <DelegateClass> --field <fieldName>
+description: clones ONE public field from delegate into target class
+usage: java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner --classNameToModify <FullyQualifiedName> --delegateclass <Delegate> --field <fieldName>
 
 
 GLOBAL RULES
 ------------
-
 Rule 0 — REQUIRED before any pipeline:
     net.bytebuddy:byte-buddy:1.15.3
     org.ow2.asm:asm:9.8
     org.ow2.asm:asm-tree:9.8
+    org.json:json:20231013
 
 Rule 1 — All STECHEN operations run line-by-line.
 
 Rule 2 — Every new project must begin with:
     CreateDirectory → CurrentDirUpdate → REQUIRED JAR DOWNLOADS
 
-Rule 3 — Spec regeneration boundaries:
-    ClassToSpecJsonFile rebuilds the spec from a .class file and DOES NOT know about
-    newFieldDescSpec or newMethodLogicSpec.
-
-    Allowed:
-        • At the START of a field or method pipeline.
-        • AFTER clone/add is complete AND BEFORE next pipeline.
-
-    Forbidden:
-        • Between SpecFieldLogicAppender and OpenAiFieldDelegateGenerator.
-        • Between SpecMethodLogicAppender and OpenAiMethodDelegateGenerator.
+Rule 3 — ClassToSpecJsonFile overwrites the spec from the actual .class file and does not preserve newFieldDescSpec or newMethodLogicSpec.
 
 Rule 4 — DynamicClassCreator always produces:
-    • one String field "name"
-    • one public method sayHello()
+    one String field "name"
+    one public method sayHello()
 
 Rule 5 — Delegates must always be named:
     <ClassName>Delegate.java
@@ -138,7 +133,8 @@ Rule 7 — UNIFIED DELEGATE PATH:
     Spec → Delegate → Clone/Add → Base
 
 Rule 8 — Field–Method dependency:
-    A method may only be created after all fields it uses exist in the base class and spec.
+    A method may only be created AFTER all fields it uses exist in both
+    the base class and the spec JSON.
 
 Rule 9 — Method call dependency:
     If method A calls method B, then B must exist before A is inserted.
@@ -147,89 +143,62 @@ Rule 10 — Required libraries must exist before running:
     ClassFieldCloner, ClassMethodCloner, DynamicClassCreator
 
 Rule 11 — Per-field and per-method execution:
-    • ONE FIELD → run ONE full FIELD pipeline
-    • ONE METHOD → run ONE full METHOD pipeline
-    No batching of multiple fields or methods.
+    ONE FIELD → ONE full field pipeline
+    ONE METHOD → ONE full method pipeline
+    No batching.
+
+Rule 12 — Visibility of generated members:
+    All generated fields must be public.
+    All generated methods must be public unless explicitly required otherwise.
 
 
 FIELD CREATION PIPELINE
 -----------------------
-
 Goal: Add ONE new field to the base class.
 
-1) Generate or update the spec JSON
+1) Generate or update the spec JSON:
        java ClassToSpecJsonFile --targetFile <BaseClass>.class
 
-2) Create a natural-language field description
+2) Create a natural-language field description:
        java CreateTextFile --name <FieldDesc>.txt --content "<description>"
 
-3) Append this description into newFieldDescSpec
+3) Append field description into newFieldDescSpec:
        java SpecFieldLogicAppender --specFile <Spec>.json --logicFile <FieldDesc>.txt --fieldName <FieldName>
 
-4) Generate the field delegate
+4) Generate field delegate:
        java OpenAiFieldDelegateGenerator --Target_spec <Spec>.json
 
-5) Transfer the field into the base class
-       java ClassFieldCloner  (preferred)
-       or java ClassFieldAdder
+5) Transfer field into base class:
+       java ClassFieldCloner (preferred)
+       OR java ClassFieldAdder
 
-After step 5, you MAY refresh the spec:
+6) Optional spec refresh:
        java ClassToSpecJsonFile --targetFile <BaseClass>.class
 
 
 METHOD CREATION PIPELINE
 ------------------------
-
 Goal: Add ONE new method to the base class.
 
-1) Generate or update the spec JSON
+1) Generate or update the spec JSON:
        java ClassToSpecJsonFile --targetFile <BaseClass>.class
 
-2) Create a natural-language method logic description
+2) Create a natural-language method description:
        java CreateTextFile --name <MethodDesc>.txt --content "<method logic>"
 
-3) Append this logic into newMethodLogicSpec
+3) Append method logic into newMethodLogicSpec:
        java SpecMethodLogicAppender --specFile <Spec>.json --logicFile <MethodDesc>.txt
 
-4) Generate the method delegate
+4) Generate method delegate:
        java OpenAiMethodDelegateGenerator --Target_spec <Spec>.json
 
-5) Transfer the method into the base class
-       java ClassMethodCloner  (preferred)
-       or java ClassMethodAdder
+5) Transfer method into base class:
+       java ClassMethodCloner (preferred)
+       OR java ClassMethodAdder
 
-After step 5, you MAY refresh the spec:
+6) Optional spec refresh:
        java ClassToSpecJsonFile --targetFile <BaseClass>.class
-
-
-EXAMPLE FULL PIPELINE
----------------------
-
-# 0. Project setup
-java CreateDirectory --name MATRIX
-java CurrentDirUpdate --dirname MATRIX
-
-# Required jars
-java DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
-java DynamicJarLoader --library org.ow2.asm:asm:9.8
-java DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
-
-# 1. Base class + initial spec
-java DynamicClassCreator --name Base
-java ClassToSpecJsonFile --targetFile Base.class
-
-# 2. Method pipeline example
-java CreateTextFile --name myMethod.txt --content "<method description>"
-java SpecMethodLogicAppender --specFile Base_spec.json --logicFile myMethod.txt
-java OpenAiMethodDelegateGenerator --Target_spec Base_spec.json
-java ClassMethodCloner --classNameToModify Base --delegateclass BaseDelegate --method myMethod
-
-# 3. Optional refresh
-java ClassToSpecJsonFile --targetFile Base.class
-
-# 4. Run the final class
-java RunClass --class Base
 
 
 END OF SPEC
-------------
+-----------
