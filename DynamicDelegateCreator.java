@@ -4,6 +4,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import javax.tools.JavaCompiler;
+import javax.tools.ToolProvider;
+
 /**
  * CLI tool that generates a delegate class:
  *   public class DynamicDelegate extends <parent> { ... }
@@ -12,7 +15,7 @@ import java.nio.file.Paths;
  *   - one field (raw Java snippet)
  *   - one method (raw Java snippet)
  *
- * Usage (flags are expected to be lower-case if you pass through the Python pipeline):
+ * Usage:
  *
  *   java DynamicDelegateCreator \
  *       --parent MyBaseClass \
@@ -62,13 +65,13 @@ public class DynamicDelegateCreator {
                     methodDecl = sb.toString().trim();
                 }
                 case "--outputdir" -> {
-                    // NOTE: if your Python normalizes flags to lowercase, you get "--outputdir" here
+                    // lowercase variant (if some pipeline normalizes flags)
                     if (i + 1 < args.length) {
                         outputDir = args[++i];
                     }
                 }
                 case "--outputDir" -> {
-                    // Also accept camelCase if you call it directly without normalization
+                    // camelCase variant (direct manual calls)
                     if (i + 1 < args.length) {
                         outputDir = args[++i];
                     }
@@ -94,7 +97,7 @@ public class DynamicDelegateCreator {
 
     private static void printUsage() {
         System.out.println("""
-            DynamicDelegateCreator - Generate DynamicDelegate.java extending a given parent.
+            DynamicDelegateCreator — Generate DynamicDelegate.java extending a given parent.
 
             Usage:
               java DynamicDelegateCreator \\
@@ -106,8 +109,7 @@ public class DynamicDelegateCreator {
             Notes:
               - --field and --method accept multi-word Java snippets; everything up to the next --flag
                 is treated as part of the declaration.
-              - If you run via the Python pipeline that normalizes flags to lowercase, the flags
-                will arrive as --parent, --field, --method, --outputdir.
+              - Both --outputDir and --outputdir are accepted.
             """);
     }
 
@@ -141,8 +143,23 @@ public class DynamicDelegateCreator {
 
         sb.append("}\n");
 
+        // Write (overwrite) .java file
         Files.writeString(outFile, sb.toString(), StandardCharsets.UTF_8);
+        System.out.println("✅ Wrote delegate source: " + outFile.toAbsolutePath());
 
-        System.out.println("✅ Wrote delegate: " + outFile.toAbsolutePath());
+        // --- Compile to .class (overwrite if exists) ---
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            System.err.println("❌ No system Java compiler available (are you running on a JRE instead of a JDK?).");
+            return;
+        }
+
+        System.out.println("🛠  Compiling DynamicDelegate.java ...");
+        int result = compiler.run(null, null, null, outFile.toString());
+        if (result != 0) {
+            System.err.println("❌ javac failed for DynamicDelegate.java, exit code: " + result);
+        } else {
+            System.out.println("✅ Compiled DynamicDelegate.class in: " + outDir.toAbsolutePath());
+        }
     }
 }

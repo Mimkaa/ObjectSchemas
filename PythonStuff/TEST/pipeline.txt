@@ -1,8 +1,11 @@
 # BYTE-BUDDY (for DynamicClassCreator and other ByteBuddy-based tools)
 DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
 
+
 # ASM (for ClassFieldCloner, ClassMethodCloner)
 DynamicJarLoader --library org.ow2.asm:asm:9.8
+
+
 DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
 
 
@@ -23,5 +26,33 @@ DynamicClassCreator --name MyBaseClass
 
 # Add an array list field
 DynamicDelegateCreator --parent MyBaseClass --field ArrayList<String> places = new ArrayList<String>(); --outputDir .
+
+
+#clone the field to the class
+ClassFieldCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --field places
+
+
+#create a method for initialization
+DynamicDelegateCreator --parent MyBaseClass --method "public void initPlacesRandom(){java.util.Random r=new java.util.Random();int count=3+r.nextInt(5);places.clear();for(int i=0;i<count;i++){places.add(\"Place_\"+r.nextInt(100000));}}"
+
+
+# copy the method inside of the class
+ClassMethodCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --method initPlacesRandom
+
+
+# main class creating
+DynamicDelegateCreator --parent MyBaseClass --method "public static void main(String[] args){MyBaseClass obj=new MyBaseClass();obj.initPlacesRandom();for(String p:obj.places){System.out.println(p);}}"
+
+
+
+#copy the main
+ClassMethodCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --method main
+
+
+#execute the method
+RunClass --class MyBaseClass
+
+
+
 
 
