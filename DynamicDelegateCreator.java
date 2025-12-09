@@ -4,9 +4,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import javax.tools.JavaCompiler;
-import javax.tools.ToolProvider;
-
 /**
  * CLI tool that generates a delegate class:
  *   public class DynamicDelegate extends <parent> { ... }
@@ -65,13 +62,13 @@ public class DynamicDelegateCreator {
                     methodDecl = sb.toString().trim();
                 }
                 case "--outputdir" -> {
-                    // lowercase variant (if some pipeline normalizes flags)
+                    // lowercase variant
                     if (i + 1 < args.length) {
                         outputDir = args[++i];
                     }
                 }
                 case "--outputDir" -> {
-                    // camelCase variant (direct manual calls)
+                    // camelCase variant
                     if (i + 1 < args.length) {
                         outputDir = args[++i];
                     }
@@ -116,7 +113,7 @@ public class DynamicDelegateCreator {
     public void writeDelegate(String parentClass,
                               String fieldDecl,
                               String methodDecl,
-                              String outputDir) throws IOException {
+                              String outputDir) throws IOException, InterruptedException {
 
         Path outDir = Paths.get(outputDir).toAbsolutePath().normalize();
         Files.createDirectories(outDir);
@@ -147,17 +144,18 @@ public class DynamicDelegateCreator {
         Files.writeString(outFile, sb.toString(), StandardCharsets.UTF_8);
         System.out.println("✅ Wrote delegate source: " + outFile.toAbsolutePath());
 
-        // --- Compile to .class (overwrite if exists) ---
-        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        if (compiler == null) {
-            System.err.println("❌ No system Java compiler available (are you running on a JRE instead of a JDK?).");
-            return;
-        }
+        // --- Compile to .class using external javac ---
+        System.out.println("🛠  Compiling DynamicDelegate.java with external javac ...");
 
-        System.out.println("🛠  Compiling DynamicDelegate.java ...");
-        int result = compiler.run(null, null, null, outFile.toString());
-        if (result != 0) {
-            System.err.println("❌ javac failed for DynamicDelegate.java, exit code: " + result);
+        ProcessBuilder pb = new ProcessBuilder("javac", outFile.getFileName().toString());
+        pb.directory(outDir.toFile());
+        pb.inheritIO(); // show compiler output in console
+
+        Process p = pb.start();
+        int exit = p.waitFor();
+
+        if (exit != 0) {
+            System.err.println("❌ javac failed for DynamicDelegate.java, exit code: " + exit);
         } else {
             System.out.println("✅ Compiled DynamicDelegate.class in: " + outDir.toAbsolutePath());
         }
