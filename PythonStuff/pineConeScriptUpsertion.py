@@ -35,30 +35,27 @@ index = pc.Index(index_name)
 scripts_to_add = [
     {
     "sentences_to_retrieve": [
-        "Create a new directory in the current working folder or a specified path.",
-        "Make a folder that other STECHEN scripts can use as a workspace.",
-        "Generate a directory structure for a new project or submodule.",
-        "Programmatically create a folder by specifying its name and optional path.",
-        "Ensure a directory exists before writing files into it.",
-        "Create a new filesystem directory to hold class files or specs.",
-        "Set up a working directory for the STECHEN pipeline execution.",
-        "Create a folder that will store generated .class files or temp data.",
-        "Produce a directory under a target path, including parent folders if needed.",
-        "Make a project directory so scripts can operate inside it.",
-        "Initialize a folder required for further file creation or code generation.",
-        "Create a named directory that acts as a container for generated artifacts.",
-        "Generate a filesystem location where future operations will take place.",
-        "Use CreateDirectory to bootstrap a structure for a new STECHEN workflow.",
-        "Make sure a directory exists before switching into it with CurrentDirUpdate."
+        "Execute a compiled Java class directly from the command line.",
+        "Run the main method of a Java class by specifying its name.",
+        "Trigger execution of a Java class produced earlier in the STECHEN pipeline.",
+        "Use this tool to run any generated .class file with a valid main method.",
+        "Launch a Java program whose class name is provided as an argument.",
+        "Invoke the main function of an already compiled Java class.",
+        "Execute dynamically created classes such as those built by DynamicClassCreator.",
+        "Run a Java class by its simple name using a helper wrapper.",
+        "Start a Java program in a subprocess from a given class name.",
+        "Use this script to test that a generated class runs successfully.",
+        "Execute Java code after methods or fields were injected via ASM tools.",
+        "Call the main method of a modified class after method/field cloning.",
+        "Use this command to verify functional output of a generated delegate.",
+        "Run a class that lives in the current working directory using Java CLI.",
+        "Launch a class built during STECHEN workflows for debugging or inspection."
     ],
-    "usage": (
-        "java CreateDirectory "
-        "--name <directoryName> "
-        "[--path <targetPath>]"
-    ),
-    "effect": "creates folder <directoryName> at the specified path",
-    "script_name": "CreateDirectory"
+    "usage": "java RunClass --class <ClassName>",
+    "effect": "executes the <ClassName> main method in a subprocess",
+    "script_name": "RunClass"
 }
+
 
 
 

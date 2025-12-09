@@ -1,0 +1,27 @@
+# BYTE-BUDDY (for DynamicClassCreator and other ByteBuddy-based tools)
+DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
+
+# ASM (for ClassFieldCloner, ClassMethodCloner)
+DynamicJarLoader --library org.ow2.asm:asm:9.8
+DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
+
+
+# Optional but nice to have for advanced transforms
+DynamicJarLoader --library org.ow2.asm:asm-commons:9.8
+
+
+DynamicJarLoader --library org.ow2.asm:asm-util:9.8
+
+
+# JSON (for spec-related tools that use org.json)
+DynamicJarLoader --library org.json:json:20240303
+
+
+# Create a class
+DynamicClassCreator --name MyBaseClass
+
+
+# Add an array list field
+DynamicDelegateCreator --parent MyBaseClass --field ArrayList<String> places = new ArrayList<String>(); --outputDir .
+
+

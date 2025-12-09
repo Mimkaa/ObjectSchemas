@@ -1,163 +1,148 @@
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
- * CLI tool that generates a DynamicDelegate.java file.
+ * CLI tool that generates a delegate class:
+ *   public class DynamicDelegate extends <parent> { ... }
  *
- * Usage:
- *   java DynamicDelegateCreator \
- *       --parent <FullyQualifiedParentClassName> \
- *       [--field "<fieldDeclaration>"] \
- *       [--method "<methodDeclaration>"] \
- *       [--outputDir <path>]
+ * It can optionally add:
+ *   - one field (raw Java snippet)
+ *   - one method (raw Java snippet)
  *
- * Examples:
- *   java DynamicDelegateCreator --parent com.example.Base
+ * Usage (flags are expected to be lower-case if you pass through the Python pipeline):
  *
  *   java DynamicDelegateCreator \
- *       --parent com.example.Base \
- *       --field "public int counter;" \
- *       --method "public void increment() { this.counter++; }"
+ *       --parent MyBaseClass \
+ *       --field ArrayList<String> places = new ArrayList<String>(); \
+ *       --outputDir .
  */
 public class DynamicDelegateCreator {
 
     public static void main(String[] args) {
-        if (args.length == 0) {
-            printUsage();
-            return;
-        }
-
         String parentClass = null;
-        String fieldDecl = null;
-        String methodDecl = null;
-        String outputDir = "."; // default: current working directory
+        String fieldDecl   = null;
+        String methodDecl  = null;
+        String outputDir   = ".";  // default: current directory
 
-        // --- Parse CLI args ---
+        // Parse args, allowing multi-word field/method declarations
         for (int i = 0; i < args.length; i++) {
-            switch (args[i]) {
+            String arg = args[i];
+
+            switch (arg) {
                 case "--parent" -> {
                     if (i + 1 < args.length) {
                         parentClass = args[++i];
                     }
                 }
                 case "--field" -> {
-                    if (i + 1 < args.length) {
-                        fieldDecl = args[++i];
+                    // Collect everything until the next flag (starts with "--")
+                    StringBuilder sb = new StringBuilder();
+                    i++;
+                    while (i < args.length && !args[i].startsWith("--")) {
+                        if (sb.length() > 0) sb.append(' ');
+                        sb.append(args[i]);
+                        i++;
                     }
+                    i--; // step back so outer loop sees the flag again
+                    fieldDecl = sb.toString().trim();
                 }
                 case "--method" -> {
+                    // Same multi-token logic for a method
+                    StringBuilder sb = new StringBuilder();
+                    i++;
+                    while (i < args.length && !args[i].startsWith("--")) {
+                        if (sb.length() > 0) sb.append(' ');
+                        sb.append(args[i]);
+                        i++;
+                    }
+                    i--;
+                    methodDecl = sb.toString().trim();
+                }
+                case "--outputdir" -> {
+                    // NOTE: if your Python normalizes flags to lowercase, you get "--outputdir" here
                     if (i + 1 < args.length) {
-                        methodDecl = args[++i];
+                        outputDir = args[++i];
                     }
                 }
                 case "--outputDir" -> {
+                    // Also accept camelCase if you call it directly without normalization
                     if (i + 1 < args.length) {
                         outputDir = args[++i];
                     }
                 }
                 default -> {
-                    // ignore unknown flags, or you can print a warning
+                    // ignore unknown tokens
                 }
             }
         }
 
-        if (parentClass == null || parentClass.isEmpty()) {
-            System.err.println("❌ ERROR: --parent <FullyQualifiedParentClassName> is required.");
+        if (parentClass == null) {
+            System.err.println("ERROR: --parent <ParentClass> is required.");
             printUsage();
             return;
         }
 
         try {
-            generateDelegate(parentClass, fieldDecl, methodDecl, outputDir);
-        } catch (IOException e) {
-            System.err.println("❌ Failed to generate DynamicDelegate.java");
+            new DynamicDelegateCreator().writeDelegate(parentClass, fieldDecl, methodDecl, outputDir);
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
     private static void printUsage() {
         System.out.println("""
-            DynamicDelegateCreator — generate a DynamicDelegate.java class that extends a given parent.
+            DynamicDelegateCreator - Generate DynamicDelegate.java extending a given parent.
 
             Usage:
               java DynamicDelegateCreator \\
-                  --parent <FullyQualifiedParentClassName> \\
-                  [--field "<fieldDeclaration>"] \\
-                  [--method "<methodDeclaration>"] \\
-                  [--outputDir <path>]
+                  --parent MyBaseClass \\
+                  [--field "public java.util.ArrayList<String> places = new java.util.ArrayList<>();"] \\
+                  [--method "public void foo() { System.out.println(\\"hi\\"); }"] \\
+                  [--outputDir .]
 
             Notes:
-              • parent must be a valid Java type name, e.g. com.example.Base
-              • field is a raw Java field declaration, e.g. "public int counter;"
-              • method is a raw Java method declaration, e.g.
-                    "public void increment() { this.counter++; }"
-              • outputDir defaults to the current directory if omitted.
-
-            Example:
-              java DynamicDelegateCreator \\
-                  --parent com.example.Base \\
-                  --field "public int counter;" \\
-                  --method "public void increment() { this.counter++; }"
+              - --field and --method accept multi-word Java snippets; everything up to the next --flag
+                is treated as part of the declaration.
+              - If you run via the Python pipeline that normalizes flags to lowercase, the flags
+                will arrive as --parent, --field, --method, --outputdir.
             """);
     }
 
-    /**
-     * Generate DynamicDelegate.java with the given parent, field, and method.
-     */
-    private static void generateDelegate(String parentClass,
-                                         String fieldDecl,
-                                         String methodDecl,
-                                         String outputDir) throws IOException {
+    public void writeDelegate(String parentClass,
+                              String fieldDecl,
+                              String methodDecl,
+                              String outputDir) throws IOException {
 
-        // Class name is fixed by your spec
-        String className = "DynamicDelegate";
+        Path outDir = Paths.get(outputDir).toAbsolutePath().normalize();
+        Files.createDirectories(outDir);
 
-        // We will use the fully qualified parent name directly in 'extends'
-        // to avoid dealing with imports/packages for now.
+        Path outFile = outDir.resolve("DynamicDelegate.java");
+
         StringBuilder sb = new StringBuilder();
 
-        // Optional comment header
-        sb.append("/**\n")
-          .append(" * Auto-generated delegate class.\n")
-          .append(" * Extends: ").append(parentClass).append("\n")
-          .append(" */\n");
+        sb.append("/**\n");
+        sb.append(" * Auto-generated delegate class.\n");
+        sb.append(" * Extends: ").append(parentClass).append("\n");
+        sb.append(" */\n");
+        sb.append("public class DynamicDelegate extends ").append(parentClass).append(" {\n\n");
 
-        sb.append("public class ").append(className)
-          .append(" extends ").append(parentClass).append(" {\n\n");
-
-        // Optional field
         if (fieldDecl != null && !fieldDecl.isBlank()) {
             sb.append("    // Cloned / specified field\n");
-            sb.append("    ").append(fieldDecl.trim()).append("\n\n");
+            sb.append("    ").append(fieldDecl).append("\n\n");
         }
 
-        // Optional method
         if (methodDecl != null && !methodDecl.isBlank()) {
             sb.append("    // Cloned / specified method\n");
-            // ensure indentation of each line of the method
-            String[] lines = methodDecl.split("\\R");
-            for (String line : lines) {
-                sb.append("    ").append(line).append("\n");
-            }
-            sb.append("\n");
+            sb.append("    ").append(methodDecl).append("\n\n");
         }
 
         sb.append("}\n");
 
-        // Ensure output directory exists
-        File outDir = new File(outputDir);
-        if (!outDir.exists() && !outDir.mkdirs()) {
-            throw new IOException("Could not create output directory: " + outDir.getAbsolutePath());
-        }
+        Files.writeString(outFile, sb.toString(), StandardCharsets.UTF_8);
 
-        File outFile = new File(outDir, className + ".java");
-
-        try (FileWriter writer = new FileWriter(outFile)) {
-            writer.write(sb.toString());
-        }
-
-        System.out.println("✅ Generated delegate source:");
-        System.out.println("   " + outFile.getAbsolutePath());
+        System.out.println("✅ Wrote delegate: " + outFile.toAbsolutePath());
     }
 }
