@@ -1,15 +1,5 @@
 ######################################################################
-# STECHEN PIPELINE (COMPLETE) — LaTeX CAT via FILE-BASED DELEGATE
-#
-# PURPOSE:
-# - Avoid CLI hard-wrap issues by NOT passing big method source through --method.
-# - Instead:
-#     1) Write Method.txt (Java method text) into WORK_DIR
-#     2) Generate DynamicDelegate.java from Method.txt
-#     3) javac DynamicDelegate.java  -> DynamicDelegate.class
-#     4) Clone writeCatTex into LaTeXCatWriter
-#     5) Add main() to LaTeXCatWriter
-#     6) Run LaTeXCatWriter -> writes PARENT_DIR\cat.tex
+# STECHEN PIPELINE (COMPLETE) — LaTeX CAT using Method.txt for EVERY method
 #
 # RULE:
 #   ✅ EXACTLY TWO BLANK LINES BETWEEN EVERY COMMAND
@@ -47,7 +37,7 @@ DynamicJarLoader --library org.json:json:20240303
 
 
 ######################################################################
-# 1) Create base target class (method will be cloned into it)
+# 1) Create base target class
 ######################################################################
 
 
@@ -56,49 +46,21 @@ DynamicClassCreator --name LaTeXCatWriter
 
 
 ######################################################################
-# 2) Write Method.txt into WORK_DIR (payload is file-based, safe)
+# 2) OVERWRITE Method.txt with writeCatTex() method (name=Method => Method.txt)
 ######################################################################
 
 
-CreateTextFile --name Method.txt --content public static void writeCatTex(){try{java.io.File workDir=new java.io.File(System.getProperty("user.dir"));java.io.File baseDir=workDir.getParentFile();if(baseDir==null)baseDir=workDir;java.io.File out=new java.io.File(baseDir,"cat.tex");java.io.PrintWriter pw=new java.io.PrintWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(out),java.nio.charset.StandardCharsets.UTF_8));pw.println("% cat.tex - TikZ cat (copy/paste ready)");pw.println("\\\\documentclass[tikz,border=6pt]{standalone}");pw.println("\\\\usepackage{tikz}");pw.println();pw.println("\\\\begin{document}");pw.println("\\\\begin{tikzpicture}[line cap=round,line join=round]");pw.println();pw.println("  % Head");pw.println("  \\\\draw (0,0) circle (1.2);");pw.println();pw.println("  % Ears");pw.println("  \\\\draw (-0.85,0.65) -- (-0.35,1.35) -- (0.0,0.70);");pw.println("  \\\\draw (0.85,0.65) -- (0.35,1.35) -- (0.0,0.70);");pw.println();pw.println("  % Eyes");pw.println("  \\\\fill (-0.45,0.25) circle (0.10);");pw.println("  \\\\fill (0.45,0.25) circle (0.10);");pw.println();pw.println("  % Nose");pw.println("  \\\\draw (0,0.05) -- (-0.12,-0.10) -- (0.12,-0.10) -- cycle;");pw.println();pw.println("  % Mouth");pw.println("  \\\\draw (0,-0.10) .. controls (-0.10,-0.20) and (-0.25,-0.20) .. (-0.35,-0.15);");pw.println("  \\\\draw (0,-0.10) .. controls (0.10,-0.20) and (0.25,-0.20) .. (0.35,-0.15);");pw.println();pw.println("  % Whiskers");pw.println("  \\\\draw (-0.15,-0.10) -- (-1.25,0.05);");pw.println("  \\\\draw (-0.15,-0.15) -- (-1.25,-0.15);");pw.println("  \\\\draw (-0.15,-0.20) -- (-1.20,-0.35);");pw.println("  \\\\draw (0.15,-0.10) -- (1.25,0.05);");pw.println("  \\\\draw (0.15,-0.15) -- (1.25,-0.15);");pw.println("  \\\\draw (0.15,-0.20) -- (1.20,-0.35);");pw.println();pw.println("  % Blush");pw.println("  \\\\draw (-0.70,-0.05) circle (0.12);");pw.println("  \\\\draw (0.70,-0.05) circle (0.12);");pw.println();pw.println("\\\\end{tikzpicture}");pw.println("\\\\end{document}");pw.flush();pw.close();System.out.println("✅ WROTE: "+out.getAbsolutePath());System.out.println("   (workDir was: "+workDir.getAbsolutePath()+")");}catch(Exception e){e.printStackTrace();}}
-
-
-
-######################################################################
-# 3) Create helper: DynamicDelegateCreatorFromFile
-#    - Reads Method.txt
-#    - Writes DynamicDelegate.java containing that method
-#    - Compiles it to DynamicDelegate.class
-######################################################################
-
-
-DynamicClassCreator --name DynamicDelegateCreatorFromFile
-
-
-
-DynamicDelegateCreator --parent DynamicDelegateCreatorFromFile --method public static void build(){try{java.nio.file.Path wd=java.nio.file.Path.of(System.getProperty("user.dir"));String method=java.nio.file.Files.readString(wd.resolve("Method.txt"));String src="public class DynamicDelegate{"+System.lineSeparator()+method+System.lineSeparator()+"}"+System.lineSeparator();java.nio.file.Files.writeString(wd.resolve("DynamicDelegate.java"),src);Process p=new ProcessBuilder("javac","DynamicDelegate.java").directory(wd.toFile()).inheritIO().start();int code=p.waitFor();if(code!=0)throw new RuntimeException("javac failed: "+code);System.out.println("✅ DynamicDelegate.class generated from Method.txt");}catch(Exception e){e.printStackTrace();}}
-
-
-
-ClassMethodCloner --classNameToModify DynamicDelegateCreatorFromFile --delegateclass DynamicDelegate --method build
-
-
-
-DynamicDelegateCreator --parent DynamicDelegateCreatorFromFile --method public static void main(String[] args){build();}
-
-
-
-ClassMethodCloner --classNameToModify DynamicDelegateCreatorFromFile --delegateclass DynamicDelegate --method main
-
-
-
-RunClass --class DynamicDelegateCreatorFromFile
+CreateTextFile --name Method --content public static void writeCatTex(){try{java.io.File wd=new java.io.File(System.getProperty("user.dir"));java.io.File base=wd.getParentFile();if(base==null)base=wd;java.io.File out=new java.io.File(base,"cat.tex");java.io.PrintWriter pw=new java.io.PrintWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(out),java.nio.charset.StandardCharsets.UTF_8));String nl=System.lineSeparator();pw.print("% cat.tex - TikZ cat");pw.print(nl);pw.print("\\\\");pw.print("documentclass");pw.print("[tikz,border=6pt]{standalone}");pw.print(nl);pw.print("\\\\");pw.print("usepackage{tikz}");pw.print(nl);pw.print(nl);pw.print("\\\\");pw.print("begin{document}");pw.print(nl);pw.print("\\\\");pw.print("begin{tikzpicture}[line cap=round,line join=round]");pw.print(nl);pw.print(nl);pw.print("  % Head");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0,0)");pw.print(" circle ");pw.print("(1.2)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("  % Ears");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(-0.85,0.65)");pw.print(" -- ");pw.print("(-0.35,1.35)");pw.print(" -- ");pw.print("(0.0,0.70)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0.85,0.65)");pw.print(" -- ");pw.print("(0.35,1.35)");pw.print(" -- ");pw.print("(0.0,0.70)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("  % Eyes");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("fill ");pw.print("(-0.45,0.25)");pw.print(" circle ");pw.print("(0.10)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("fill ");pw.print("(0.45,0.25)");pw.print(" circle ");pw.print("(0.10)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("  % Nose");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0,0.05)");pw.print(" -- ");pw.print("(-0.12,-0.10)");pw.print(" -- ");pw.print("(0.12,-0.10)");pw.print(" -- cycle;");pw.print(nl);pw.print(nl);pw.print("  % Mouth");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0,-0.10)");pw.print(" .. controls ");pw.print("(-0.10,-0.20)");pw.print(" and ");pw.print("(-0.25,-0.20)");pw.print(" .. ");pw.print("(-0.35,-0.15)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0,-0.10)");pw.print(" .. controls ");pw.print("(0.10,-0.20)");pw.print(" and ");pw.print("(0.25,-0.20)");pw.print(" .. ");pw.print("(0.35,-0.15)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("  % Whiskers");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(-0.15,-0.10)");pw.print(" -- ");pw.print("(-1.25,0.05)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(-0.15,-0.15)");pw.print(" -- ");pw.print("(-1.25,-0.15)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(-0.15,-0.20)");pw.print(" -- ");pw.print("(-1.20,-0.35)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0.15,-0.10)");pw.print(" -- ");pw.print("(1.25,0.05)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0.15,-0.15)");pw.print(" -- ");pw.print("(1.25,-0.15)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0.15,-0.20)");pw.print(" -- ");pw.print("(1.20,-0.35)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("  % Blush");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(-0.70,-0.05)");pw.print(" circle ");pw.print("(0.12)");pw.print(";");pw.print(nl);pw.print("  ");pw.print("\\\\");pw.print("draw ");pw.print("(0.70,-0.05)");pw.print(" circle ");pw.print("(0.12)");pw.print(";");pw.print(nl);pw.print(nl);pw.print("\\\\");pw.print("end{tikzpicture}");pw.print(nl);pw.print("\\\\");pw.print("end{document}");pw.print(nl);pw.flush();pw.close();}catch(Exception e){e.printStackTrace();}}
 
 
 
 ######################################################################
-# 4) Clone writeCatTex() into LaTeXCatWriter
+# 3) Build delegate from Method.txt + clone writeCatTex() into LaTeXCatWriter
 ######################################################################
+
+
+DynamicDelegateCreator --parent LaTeXCatWriter --methodFile Method.txt --outputDir .
+
 
 
 ClassMethodCloner --classNameToModify LaTeXCatWriter --delegateclass DynamicDelegate --method writeCatTex
@@ -106,11 +68,20 @@ ClassMethodCloner --classNameToModify LaTeXCatWriter --delegateclass DynamicDele
 
 
 ######################################################################
-# 5) Add main() into LaTeXCatWriter
+# 4) OVERWRITE Method.txt with main() method
 ######################################################################
 
 
-DynamicDelegateCreator --parent LaTeXCatWriter --method public static void main(String[] args){System.out.println("Generating cat.tex in parent directory...");writeCatTex();System.out.println("Compile with: pdflatex cat.tex  (or latexmk -pdf cat.tex)");}
+CreateTextFile --name Method --content public static void main(String[] args){System.out.println("Generating cat.tex in parent directory...");writeCatTex();System.out.println("Compile with: pdflatex cat.tex (or latexmk -pdf cat.tex)");}
+
+
+
+######################################################################
+# 5) Build delegate from Method.txt + clone main() into LaTeXCatWriter
+######################################################################
+
+
+DynamicDelegateCreator --parent LaTeXCatWriter --methodFile Method.txt --outputDir .
 
 
 
@@ -119,7 +90,7 @@ ClassMethodCloner --classNameToModify LaTeXCatWriter --delegateclass DynamicDele
 
 
 ######################################################################
-# 6) Run LaTeXCatWriter (writes PARENT_DIR\cat.tex)
+# 6) Run LaTeXCatWriter (writes PARENT_DIR\\cat.tex)
 ######################################################################
 
 

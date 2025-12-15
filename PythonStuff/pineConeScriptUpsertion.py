@@ -34,33 +34,29 @@ index = pc.Index(index_name)
 # --- New scripts/data to add ---
 scripts_to_add = [
     {
-    "sentences_to_retrieve": [
-        "Execute a compiled Java class directly from the command line.",
-        "Run the main method of a Java class by specifying its name.",
-        "Trigger execution of a Java class produced earlier in the STECHEN pipeline.",
-        "Use this tool to run any generated .class file with a valid main method.",
-        "Launch a Java program whose class name is provided as an argument.",
-        "Invoke the main function of an already compiled Java class.",
-        "Execute dynamically created classes such as those built by DynamicClassCreator.",
-        "Run a Java class by its simple name using a helper wrapper.",
-        "Start a Java program in a subprocess from a given class name.",
-        "Use this script to test that a generated class runs successfully.",
-        "Execute Java code after methods or fields were injected via ASM tools.",
-        "Call the main method of a modified class after method/field cloning.",
-        "Use this command to verify functional output of a generated delegate.",
-        "Run a class that lives in the current working directory using Java CLI.",
-        "Launch a class built during STECHEN workflows for debugging or inspection."
-    ],
-    "usage": "java RunClass --class <ClassName>",
-    "effect": "executes the <ClassName> main method in a subprocess",
-    "script_name": "RunClass"
-}
-
-
-
-
-
+        "sentences_to_retrieve": [
+            "Create a text file whose contents are provided in Base64 encoding.",
+            "Safely write large or complex text payloads to a .txt file using Base64.",
+            "Generate a text file from Base64-decoded content to avoid CLI wrapping issues.",
+            "Use this tool to store Java method bodies encoded in Base64 into Method.txt.",
+            "Create a .txt file by decoding Base64 content inside the Java process.",
+            "Write decoded UTF-8 text to a file using a Base64-safe pipeline step.",
+            "Avoid command-line escaping problems by passing file contents as Base64.",
+            "Store dynamically generated source code in a text file via Base64 input.",
+            "Create Method.txt for DynamicDelegateCreator using Base64-encoded content.",
+            "Use this script when raw text is too large or unsafe for CLI arguments.",
+            "Write arbitrary text files from Base64 strings during STECHEN workflows.",
+            "Safely persist multi-line code snippets into text files using Base64.",
+            "Generate text files without exposing raw content to shell parsing.",
+            "Create a .txt file with decoded Base64 payload inside the workspace.",
+            "Use this script to reliably inject large text blocks into the pipeline."
+        ],
+        "usage": "java CreateTextFileFromBase64 --name <fileName> [--path <targetPath>] --contentB64 <base64Text>",
+        "effect": "decodes <base64Text> as UTF-8 and writes it to <fileName>.txt at the specified path",
+        "script_name": "CreateTextFileFromBase64"
+    }
 ]
+
 
 # --- Find the highest vec number already in Pinecone ---
 existing_vectors = index.query(
