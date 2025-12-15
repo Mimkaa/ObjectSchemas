@@ -8,24 +8,29 @@ import java.nio.file.Paths;
  * CLI tool that generates a delegate class:
  *   public class DynamicDelegate extends <parent> { ... }
  *
- * It can optionally add:
- *   - one field (raw Java snippet)
- *   - one method (raw Java snippet)
+ * Supports inline snippets:
+ *   --field  <multi-token java snippet>
+ *   --method <multi-token java snippet>
+ *
+ * Supports file-based snippets (recommended for large payloads):
+ *   --fieldFile  <path-to-text-file>
+ *   --methodFile <path-to-text-file>
  *
  * Usage:
- *
- *   java DynamicDelegateCreator \
- *       --parent MyBaseClass \
- *       --field ArrayList<String> places = new ArrayList<String>(); \
- *       --outputDir .
+ *   java DynamicDelegateCreator --parent MyBaseClass --methodFile Method.txt --outputDir .
  */
 public class DynamicDelegateCreator {
 
     public static void main(String[] args) {
         String parentClass = null;
-        String fieldDecl   = null;
-        String methodDecl  = null;
-        String outputDir   = ".";  // default: current directory
+
+        String fieldDecl = null;
+        String methodDecl = null;
+
+        String fieldFile = null;
+        String methodFile = null;
+
+        String outputDir = "."; // default: current directory
 
         // Parse args, allowing multi-word field/method declarations
         for (int i = 0; i < args.length; i++) {
@@ -33,12 +38,18 @@ public class DynamicDelegateCreator {
 
             switch (arg) {
                 case "--parent" -> {
-                    if (i + 1 < args.length) {
-                        parentClass = args[++i];
-                    }
+                    if (i + 1 < args.length) parentClass = args[++i];
                 }
+
+                case "--fieldFile" -> {
+                    if (i + 1 < args.length) fieldFile = args[++i];
+                }
+
+                case "--methodFile" -> {
+                    if (i + 1 < args.length) methodFile = args[++i];
+                }
+
                 case "--field" -> {
-                    // Collect everything until the next flag (starts with "--")
                     StringBuilder sb = new StringBuilder();
                     i++;
                     while (i < args.length && !args[i].startsWith("--")) {
@@ -49,8 +60,8 @@ public class DynamicDelegateCreator {
                     i--; // step back so outer loop sees the flag again
                     fieldDecl = sb.toString().trim();
                 }
+
                 case "--method" -> {
-                    // Same multi-token logic for a method
                     StringBuilder sb = new StringBuilder();
                     i++;
                     while (i < args.length && !args[i].startsWith("--")) {
@@ -61,18 +72,11 @@ public class DynamicDelegateCreator {
                     i--;
                     methodDecl = sb.toString().trim();
                 }
-                case "--outputdir" -> {
-                    // lowercase variant
-                    if (i + 1 < args.length) {
-                        outputDir = args[++i];
-                    }
+
+                case "--outputdir", "--outputDir" -> {
+                    if (i + 1 < args.length) outputDir = args[++i];
                 }
-                case "--outputDir" -> {
-                    // camelCase variant
-                    if (i + 1 < args.length) {
-                        outputDir = args[++i];
-                    }
-                }
+
                 default -> {
                     // ignore unknown tokens
                 }
@@ -86,6 +90,14 @@ public class DynamicDelegateCreator {
         }
 
         try {
+            // If file flags exist, they override inline snippets
+            if (fieldFile != null && !fieldFile.isBlank()) {
+                fieldDecl = readAll(Paths.get(fieldFile));
+            }
+            if (methodFile != null && !methodFile.isBlank()) {
+                methodDecl = readAll(Paths.get(methodFile));
+            }
+
             new DynamicDelegateCreator().writeDelegate(parentClass, fieldDecl, methodDecl, outputDir);
         } catch (Exception e) {
             e.printStackTrace();
@@ -101,13 +113,22 @@ public class DynamicDelegateCreator {
                   --parent MyBaseClass \\
                   [--field "public java.util.ArrayList<String> places = new java.util.ArrayList<>();"] \\
                   [--method "public void foo() { System.out.println(\\"hi\\"); }"] \\
+                  [--fieldFile Field.txt] \\
+                  [--methodFile Method.txt] \\
                   [--outputDir .]
 
             Notes:
               - --field and --method accept multi-word Java snippets; everything up to the next --flag
                 is treated as part of the declaration.
+              - --fieldFile / --methodFile read the entire file content (UTF-8) and override inline values.
               - Both --outputDir and --outputdir are accepted.
             """);
+    }
+
+    private static String readAll(Path p) throws IOException {
+        // Resolve relative paths against the current working directory
+        Path abs = p.isAbsolute() ? p : Paths.get(System.getProperty("user.dir")).resolve(p).normalize();
+        return Files.readString(abs, StandardCharsets.UTF_8).trim();
     }
 
     public void writeDelegate(String parentClass,
@@ -149,7 +170,7 @@ public class DynamicDelegateCreator {
 
         ProcessBuilder pb = new ProcessBuilder("javac", outFile.getFileName().toString());
         pb.directory(outDir.toFile());
-        pb.inheritIO(); // show compiler output in console
+        pb.inheritIO();
 
         Process p = pb.start();
         int exit = p.waitFor();

@@ -1,0 +1,187 @@
+######################################################################
+# STECHEN PIPELINE (COMPLETE + FIXED) — ONE-LINERS ONLY
+#
+# RULE:
+#   ✅ EXACTLY TWO BLANK LINES BETWEEN EVERY COMMAND
+#
+# Execution model:
+# - Java code is generated / compiled / run inside .stechen_work
+# - All real effects happen in the PARENT directory (project root)
+# - venv step WAITS for pip install pygame to finish
+# - final step runs python via .venv\Scripts\python.exe (no activate)
+#   in a DETACHED process so the runner can delete .stechen_work
+######################################################################
+
+
+
+######################################################################
+# 0) Load required libraries (downloaded into WORK_DIR)
+######################################################################
+
+
+DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
+
+
+
+DynamicJarLoader --library org.ow2.asm:asm:9.8
+
+
+
+DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
+
+
+
+DynamicJarLoader --library org.ow2.asm:asm-commons:9.8
+
+
+
+DynamicJarLoader --library org.ow2.asm:asm-util:9.8
+
+
+
+DynamicJarLoader --library org.json:json:20240303
+
+
+
+######################################################################
+# 1) GitCloner — clone Game_dev_trinkets repository (PARENT DIR)
+######################################################################
+
+
+DynamicClassCreator --name GitCloner
+
+
+
+DynamicDelegateCreator --parent GitCloner --method public static void cloneRepo(){try{java.io.File baseDir=new java.io.File(System.getProperty("user.dir")).getParentFile();if(baseDir==null)baseDir=new java.io.File(System.getProperty("user.dir"));ProcessBuilder pb=new ProcessBuilder("git","clone","https://github.com/Mimkaa/Game_dev_trinkets.git");pb.directory(baseDir);pb.inheritIO();Process p=pb.start();int exit=p.waitFor();if(exit==0){System.out.println("Clone completed successfully.");}else{System.out.println("git clone exited with code "+exit);}}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify GitCloner --delegateclass DynamicDelegate --method cloneRepo
+
+
+
+DynamicDelegateCreator --parent GitCloner --method public static void main(String[] args){System.out.println("Cloning Game_dev_trinkets repository into parent directory...");cloneRepo();}
+
+
+
+ClassMethodCloner --classNameToModify GitCloner --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class GitCloner
+
+
+
+######################################################################
+# 2) PythonFileWriter — write objects.py (PARENT DIR repo)
+######################################################################
+
+
+DynamicClassCreator --name PythonFileWriter
+
+
+
+DynamicDelegateCreator --parent PythonFileWriter --method public static void writeCircleClass(){try{java.io.File baseDir=new java.io.File(System.getProperty("user.dir")).getParentFile();if(baseDir==null)baseDir=new java.io.File(System.getProperty("user.dir"));String filePath=new java.io.File(baseDir,"Game_dev_trinkets/Pygame_Template/objects.py").getAbsolutePath();String content=String.join("\n","import pygame as pg","from settings import *","","class Circle(pg.sprite.Sprite):","\tdef __init__(self, game, x, y, radius=20, color=WHITE):","\t\tsuper().__init__(game.all_sprites)","\t\tself.game = game","\t\tself.x = x","\t\tself.y = y","\t\tself.radius = radius","\t\tself.color = color","\t\tself.image = pg.Surface((radius * 2, radius * 2), pg.SRCALPHA)","\t\tpg.draw.circle(self.image, self.color, (radius, radius), radius)","\t\tself.rect = self.image.get_rect(center=(x, y))","","\tdef update(self):","\t\tpass","","\tdef draw(self):","\t\tself.game.screen.blit(self.image, self.rect)");java.nio.file.Files.writeString(java.nio.file.Path.of(filePath),content);System.out.println("objects.py written (parent dir repo)");}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify PythonFileWriter --delegateclass DynamicDelegate --method writeCircleClass
+
+
+
+DynamicDelegateCreator --parent PythonFileWriter --method public static void main(String[] args){System.out.println("Writing objects.py in parent directory repo...");writeCircleClass();}
+
+
+
+ClassMethodCloner --classNameToModify PythonFileWriter --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class PythonFileWriter
+
+
+
+######################################################################
+# 3) PythonMainWriter — write main.py (PARENT DIR repo)
+######################################################################
+
+
+DynamicClassCreator --name PythonMainWriter
+
+
+
+DynamicDelegateCreator --parent PythonMainWriter --method public static void writeMainWithCircles(){try{java.io.File baseDir=new java.io.File(System.getProperty("user.dir")).getParentFile();if(baseDir==null)baseDir=new java.io.File(System.getProperty("user.dir"));String filePath=new java.io.File(baseDir,"Game_dev_trinkets/Pygame_Template/main.py").getAbsolutePath();String content=String.join("\n","import pygame as pg","import sys","import random","from settings import *","from objects import *","from os import path","","class Game:","\tdef __init__(self):","\t\tpg.init()","\t\tself.screen = pg.display.set_mode((WIDTH, HEIGHT))","\t\tpg.display.set_caption(TITLE)","\t\tself.clock = pg.time.Clock()","\t\tpg.key.set_repeat(500, 100)","\t\tself.load_data()","","\tdef load_data(self):","\t\tself.font = path.join(\"PixelatedRegular-aLKm.ttf\")","","\tdef draw_text(self, text, font_name, size, color, x, y, align=\"nw\"):","\t\tfont = pg.font.Font(font_name, size)","\t\ttext_surface = font.render(text, True, color)","\t\ttext_rect = text_surface.get_rect()","\t\tif align == \"nw\":","\t\t\ttext_rect.topleft = (x, y)","\t\tif align == \"ne\":","\t\t\ttext_rect.topright = (x, y)","\t\tif align == \"center\":","\t\t\ttext_rect.center = (x, y)","\t\tself.screen.blit(text_surface, text_rect)","\t\treturn text_rect","","\tdef new(self):","\t\tself.all_sprites = pg.sprite.Group()","\t\tself.circles = []","\t\tcolors = [(255,0,0),(0,255,0),(0,0,255),(255,255,0),(0,255,255),(255,0,255),(255,255,255)]","\t\tfor _ in range(20):","\t\t\tr = random.randint(10, 40)","\t\t\tx = random.randint(r, WIDTH - r)","\t\t\ty = random.randint(r, HEIGHT - r)","\t\t\tc = random.choice(colors)","\t\t\tself.circles.append(Circle(self, x, y, r, c))","","\tdef run(self):","\t\tself.playing = True","\t\twhile self.playing:","\t\t\tself.clock.tick(FPS)","\t\t\tself.events()","\t\t\tself.update()","\t\t\tself.draw()","\t\tpg.quit()","","\tdef update(self):","\t\tself.all_sprites.update()","","\tdef draw(self):","\t\tself.screen.fill(BGCOLOR)","\t\tself.all_sprites.draw(self.screen)","\t\tfor c in self.circles:","\t\t\tc.draw()","\t\tself.draw_text(str(int(self.clock.get_fps())), self.font, 40, (255,255,255), 50, 50, align=\"center\")","\t\tpg.display.flip()","","\tdef events(self):","\t\tfor event in pg.event.get():","\t\t\tif event.type == pg.QUIT:","\t\t\t\tself.playing = False","\t\t\tif event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:","\t\t\t\tself.playing = False","","g = Game()","g.new()","g.run()");java.nio.file.Files.writeString(java.nio.file.Path.of(filePath),content);System.out.println("main.py written (parent dir repo)");}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify PythonMainWriter --delegateclass DynamicDelegate --method writeMainWithCircles
+
+
+
+DynamicDelegateCreator --parent PythonMainWriter --method public static void main(String[] args){System.out.println("Writing main.py in parent directory repo...");writeMainWithCircles();}
+
+
+
+ClassMethodCloner --classNameToModify PythonMainWriter --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class PythonMainWriter
+
+
+
+######################################################################
+# 4) PyVenvSetup — create venv and install pygame (WAIT FOR PIP)
+######################################################################
+
+
+DynamicClassCreator --name PyVenvSetup
+
+
+
+DynamicDelegateCreator --parent PyVenvSetup --method public static void setupVenv(){try{java.io.File baseDir=new java.io.File(System.getProperty("user.dir")).getParentFile();if(baseDir==null)baseDir=new java.io.File(System.getProperty("user.dir"));String projectDir=new java.io.File(baseDir,"Game_dev_trinkets/Pygame_Template").getAbsolutePath();String venvDir=projectDir+java.io.File.separator+".venv";String basePython="C:\\\\Program Files\\\\Python38\\\\python.exe";Process p1=new ProcessBuilder(basePython,"-m","venv",venvDir).directory(new java.io.File(projectDir)).inheritIO().start();if(p1.waitFor()!=0){System.out.println("venv creation failed");return;}String venvPython=venvDir+java.io.File.separator+"Scripts"+java.io.File.separator+"python.exe";Process p2=new ProcessBuilder(venvPython,"-m","pip","install","pygame").directory(new java.io.File(projectDir)).inheritIO().start();int exit=p2.waitFor();if(exit!=0){System.out.println("pip install pygame failed with code "+exit);}else{System.out.println("pygame installed successfully");}}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify PyVenvSetup --delegateclass DynamicDelegate --method setupVenv
+
+
+
+DynamicDelegateCreator --parent PyVenvSetup --method public static void main(String[] args){System.out.println("Setting up Python venv + installing pygame...");setupVenv();}
+
+
+
+ClassMethodCloner --classNameToModify PyVenvSetup --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class PyVenvSetup
+
+
+
+######################################################################
+# 5) PyRunMainDetached — FINAL STEP (DETACHED, NO ACTIVATE)
+######################################################################
+
+
+DynamicClassCreator --name PyRunMainDetached
+
+
+
+DynamicDelegateCreator --parent PyRunMainDetached --method public static void runDetached(){try{java.io.File baseDir=new java.io.File(System.getProperty("user.dir")).getParentFile();if(baseDir==null)baseDir=new java.io.File(System.getProperty("user.dir"));java.io.File projectDirFile=new java.io.File(baseDir,"Game_dev_trinkets/Pygame_Template");String projectDir=projectDirFile.getAbsolutePath();String py=projectDir+java.io.File.separator+".venv"+java.io.File.separator+"Scripts"+java.io.File.separator+"python.exe";ProcessBuilder pb=new ProcessBuilder("cmd","/c","start","\"Pygame\"","\""+py+"\"","main.py");pb.directory(projectDirFile);pb.start();System.out.println("Detached python launched: "+py);System.out.println("Working dir: "+projectDir);}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify PyRunMainDetached --delegateclass DynamicDelegate --method runDetached
+
+
+
+DynamicDelegateCreator --parent PyRunMainDetached --method public static void main(String[] args){System.out.println("Launching main.py with venv python (detached)...");runDetached();}
+
+
+
+ClassMethodCloner --classNameToModify PyRunMainDetached --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class PyRunMainDetached

@@ -1,58 +1,126 @@
-# BYTE-BUDDY (for DynamicClassCreator and other ByteBuddy-based tools)
+######################################################################
+# STECHEN PIPELINE (COMPLETE) — LaTeX CAT via FILE-BASED DELEGATE
+#
+# PURPOSE:
+# - Avoid CLI hard-wrap issues by NOT passing big method source through --method.
+# - Instead:
+#     1) Write Method.txt (Java method text) into WORK_DIR
+#     2) Generate DynamicDelegate.java from Method.txt
+#     3) javac DynamicDelegate.java  -> DynamicDelegate.class
+#     4) Clone writeCatTex into LaTeXCatWriter
+#     5) Add main() to LaTeXCatWriter
+#     6) Run LaTeXCatWriter -> writes PARENT_DIR\cat.tex
+#
+# RULE:
+#   ✅ EXACTLY TWO BLANK LINES BETWEEN EVERY COMMAND
+######################################################################
+
+
+
+######################################################################
+# 0) Load required libraries (downloaded into WORK_DIR)
+######################################################################
+
+
 DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
 
 
-# ASM (for ClassFieldCloner, ClassMethodCloner)
+
 DynamicJarLoader --library org.ow2.asm:asm:9.8
+
 
 
 DynamicJarLoader --library org.ow2.asm:asm-tree:9.8
 
 
-# Optional but nice to have for advanced transforms
+
 DynamicJarLoader --library org.ow2.asm:asm-commons:9.8
+
 
 
 DynamicJarLoader --library org.ow2.asm:asm-util:9.8
 
 
-# JSON (for spec-related tools that use org.json)
+
 DynamicJarLoader --library org.json:json:20240303
 
 
-# Create a class
-DynamicClassCreator --name MyBaseClass
+
+######################################################################
+# 1) Create base target class (method will be cloned into it)
+######################################################################
 
 
-# Add an array list field
-DynamicDelegateCreator --parent MyBaseClass --field ArrayList<String> places = new ArrayList<String>(); --outputDir .
-
-
-#clone the field to the class
-ClassFieldCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --field places
-
-
-#create a method for initialization
-DynamicDelegateCreator --parent MyBaseClass --method "public void initPlacesRandom(){java.util.Random r=new java.util.Random();int count=3+r.nextInt(5);places.clear();for(int i=0;i<count;i++){places.add(\"Place_\"+r.nextInt(100000));}}"
-
-
-# copy the method inside of the class
-ClassMethodCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --method initPlacesRandom
-
-
-# main class creating
-DynamicDelegateCreator --parent MyBaseClass --method "public static void main(String[] args){MyBaseClass obj=new MyBaseClass();obj.initPlacesRandom();for(String p:obj.places){System.out.println(p);}}"
+DynamicClassCreator --name LaTeXCatWriter
 
 
 
-#copy the main
-ClassMethodCloner --classNameToModify MyBaseClass --delegateclass DynamicDelegate --method main
+######################################################################
+# 2) Write Method.txt into WORK_DIR (payload is file-based, safe)
+######################################################################
 
 
-#execute the method
-RunClass --class MyBaseClass
-
-
+CreateTextFile --name Method.txt --content public static void writeCatTex(){try{java.io.File workDir=new java.io.File(System.getProperty("user.dir"));java.io.File baseDir=workDir.getParentFile();if(baseDir==null)baseDir=workDir;java.io.File out=new java.io.File(baseDir,"cat.tex");java.io.PrintWriter pw=new java.io.PrintWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(out),java.nio.charset.StandardCharsets.UTF_8));pw.println("% cat.tex - TikZ cat (copy/paste ready)");pw.println("\\\\documentclass[tikz,border=6pt]{standalone}");pw.println("\\\\usepackage{tikz}");pw.println();pw.println("\\\\begin{document}");pw.println("\\\\begin{tikzpicture}[line cap=round,line join=round]");pw.println();pw.println("  % Head");pw.println("  \\\\draw (0,0) circle (1.2);");pw.println();pw.println("  % Ears");pw.println("  \\\\draw (-0.85,0.65) -- (-0.35,1.35) -- (0.0,0.70);");pw.println("  \\\\draw (0.85,0.65) -- (0.35,1.35) -- (0.0,0.70);");pw.println();pw.println("  % Eyes");pw.println("  \\\\fill (-0.45,0.25) circle (0.10);");pw.println("  \\\\fill (0.45,0.25) circle (0.10);");pw.println();pw.println("  % Nose");pw.println("  \\\\draw (0,0.05) -- (-0.12,-0.10) -- (0.12,-0.10) -- cycle;");pw.println();pw.println("  % Mouth");pw.println("  \\\\draw (0,-0.10) .. controls (-0.10,-0.20) and (-0.25,-0.20) .. (-0.35,-0.15);");pw.println("  \\\\draw (0,-0.10) .. controls (0.10,-0.20) and (0.25,-0.20) .. (0.35,-0.15);");pw.println();pw.println("  % Whiskers");pw.println("  \\\\draw (-0.15,-0.10) -- (-1.25,0.05);");pw.println("  \\\\draw (-0.15,-0.15) -- (-1.25,-0.15);");pw.println("  \\\\draw (-0.15,-0.20) -- (-1.20,-0.35);");pw.println("  \\\\draw (0.15,-0.10) -- (1.25,0.05);");pw.println("  \\\\draw (0.15,-0.15) -- (1.25,-0.15);");pw.println("  \\\\draw (0.15,-0.20) -- (1.20,-0.35);");pw.println();pw.println("  % Blush");pw.println("  \\\\draw (-0.70,-0.05) circle (0.12);");pw.println("  \\\\draw (0.70,-0.05) circle (0.12);");pw.println();pw.println("\\\\end{tikzpicture}");pw.println("\\\\end{document}");pw.flush();pw.close();System.out.println("✅ WROTE: "+out.getAbsolutePath());System.out.println("   (workDir was: "+workDir.getAbsolutePath()+")");}catch(Exception e){e.printStackTrace();}}
 
 
 
+######################################################################
+# 3) Create helper: DynamicDelegateCreatorFromFile
+#    - Reads Method.txt
+#    - Writes DynamicDelegate.java containing that method
+#    - Compiles it to DynamicDelegate.class
+######################################################################
+
+
+DynamicClassCreator --name DynamicDelegateCreatorFromFile
+
+
+
+DynamicDelegateCreator --parent DynamicDelegateCreatorFromFile --method public static void build(){try{java.nio.file.Path wd=java.nio.file.Path.of(System.getProperty("user.dir"));String method=java.nio.file.Files.readString(wd.resolve("Method.txt"));String src="public class DynamicDelegate{"+System.lineSeparator()+method+System.lineSeparator()+"}"+System.lineSeparator();java.nio.file.Files.writeString(wd.resolve("DynamicDelegate.java"),src);Process p=new ProcessBuilder("javac","DynamicDelegate.java").directory(wd.toFile()).inheritIO().start();int code=p.waitFor();if(code!=0)throw new RuntimeException("javac failed: "+code);System.out.println("✅ DynamicDelegate.class generated from Method.txt");}catch(Exception e){e.printStackTrace();}}
+
+
+
+ClassMethodCloner --classNameToModify DynamicDelegateCreatorFromFile --delegateclass DynamicDelegate --method build
+
+
+
+DynamicDelegateCreator --parent DynamicDelegateCreatorFromFile --method public static void main(String[] args){build();}
+
+
+
+ClassMethodCloner --classNameToModify DynamicDelegateCreatorFromFile --delegateclass DynamicDelegate --method main
+
+
+
+RunClass --class DynamicDelegateCreatorFromFile
+
+
+
+######################################################################
+# 4) Clone writeCatTex() into LaTeXCatWriter
+######################################################################
+
+
+ClassMethodCloner --classNameToModify LaTeXCatWriter --delegateclass DynamicDelegate --method writeCatTex
+
+
+
+######################################################################
+# 5) Add main() into LaTeXCatWriter
+######################################################################
+
+
+DynamicDelegateCreator --parent LaTeXCatWriter --method public static void main(String[] args){System.out.println("Generating cat.tex in parent directory...");writeCatTex();System.out.println("Compile with: pdflatex cat.tex  (or latexmk -pdf cat.tex)");}
+
+
+
+ClassMethodCloner --classNameToModify LaTeXCatWriter --delegateclass DynamicDelegate --method main
+
+
+
+######################################################################
+# 6) Run LaTeXCatWriter (writes PARENT_DIR\cat.tex)
+######################################################################
+
+
+RunClass --class LaTeXCatWriter
