@@ -1,0 +1,1 @@
+make a 2048 game inside of vs code and for that open vs code

@@ -3,6 +3,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Base64;
 
 /**
  * CLI tool that generates a delegate class:
@@ -12,12 +13,23 @@ import java.nio.file.Paths;
  *   --field  <multi-token java snippet>
  *   --method <multi-token java snippet>
  *
- * Supports file-based snippets (recommended for large payloads):
+ * Supports file-based snippets:
  *   --fieldFile  <path-to-text-file>
  *   --methodFile <path-to-text-file>
  *
- * Usage:
- *   java DynamicDelegateCreator --parent MyBaseClass --methodFile Method.txt --outputDir .
+ * Supports Base64 variants for EVERY parameter (UTF-8 decoded):
+ *   --parentB64
+ *   --fieldB64
+ *   --methodB64
+ *   --fieldFileB64
+ *   --methodFileB64
+ *   --outputDirB64   (also accepts --outputdirB64)
+ *
+ * Precedence (per param):
+ *   file > B64 > inline
+ *
+ * Note: For *paths*, file flags still mean "read this file's content".
+ *       The B64 variants for file flags decode to the *path string*.
  */
 public class DynamicDelegateCreator {
 
@@ -32,23 +44,38 @@ public class DynamicDelegateCreator {
 
         String outputDir = "."; // default: current directory
 
+        // --------------------------------------------------
         // Parse args, allowing multi-word field/method declarations
+        // --------------------------------------------------
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
 
             switch (arg) {
+                // -------- parent (plain + B64)
                 case "--parent" -> {
                     if (i + 1 < args.length) parentClass = args[++i];
                 }
+                case "--parentB64" -> {
+                    if (i + 1 < args.length) parentClass = decodeB64Utf8(args[++i]);
+                }
 
+                // -------- fieldFile (plain + B64 path)
                 case "--fieldFile" -> {
                     if (i + 1 < args.length) fieldFile = args[++i];
                 }
+                case "--fieldFileB64" -> {
+                    if (i + 1 < args.length) fieldFile = decodeB64Utf8(args[++i]);
+                }
 
+                // -------- methodFile (plain + B64 path)
                 case "--methodFile" -> {
                     if (i + 1 < args.length) methodFile = args[++i];
                 }
+                case "--methodFileB64" -> {
+                    if (i + 1 < args.length) methodFile = decodeB64Utf8(args[++i]);
+                }
 
+                // -------- field (inline multi-token) + B64
                 case "--field" -> {
                     StringBuilder sb = new StringBuilder();
                     i++;
@@ -60,7 +87,11 @@ public class DynamicDelegateCreator {
                     i--; // step back so outer loop sees the flag again
                     fieldDecl = sb.toString().trim();
                 }
+                case "--fieldB64" -> {
+                    if (i + 1 < args.length) fieldDecl = decodeB64Utf8(args[++i]);
+                }
 
+                // -------- method (inline multi-token) + B64
                 case "--method" -> {
                     StringBuilder sb = new StringBuilder();
                     i++;
@@ -72,9 +103,16 @@ public class DynamicDelegateCreator {
                     i--;
                     methodDecl = sb.toString().trim();
                 }
+                case "--methodB64" -> {
+                    if (i + 1 < args.length) methodDecl = decodeB64Utf8(args[++i]);
+                }
 
+                // -------- outputDir (plain + B64)
                 case "--outputdir", "--outputDir" -> {
                     if (i + 1 < args.length) outputDir = args[++i];
+                }
+                case "--outputdirB64", "--outputDirB64" -> {
+                    if (i + 1 < args.length) outputDir = decodeB64Utf8(args[++i]);
                 }
 
                 default -> {
@@ -83,14 +121,18 @@ public class DynamicDelegateCreator {
             }
         }
 
-        if (parentClass == null) {
-            System.err.println("ERROR: --parent <ParentClass> is required.");
+        if (parentClass == null || parentClass.isBlank()) {
+            System.err.println("ERROR: --parent <ParentClass> (or --parentB64) is required.");
             printUsage();
             return;
         }
 
         try {
-            // If file flags exist, they override inline snippets
+            // --------------------------------------------------
+            // Precedence: file > inline/B64 snippet
+            //
+            // If fieldFile/methodFile exist, they override fieldDecl/methodDecl
+            // --------------------------------------------------
             if (fieldFile != null && !fieldFile.isBlank()) {
                 fieldDecl = readAll(Paths.get(fieldFile));
             }
@@ -111,17 +153,24 @@ public class DynamicDelegateCreator {
             Usage:
               java DynamicDelegateCreator \\
                   --parent MyBaseClass \\
-                  [--field "public java.util.ArrayList<String> places = new java.util.ArrayList<>();"] \\
+                  [--parentB64 <base64-utf8-parent>] \\
+                  [--field "public int x;"] \\
+                  [--fieldB64 <base64-utf8-field-snippet>] \\
                   [--method "public void foo() { System.out.println(\\"hi\\"); }"] \\
+                  [--methodB64 <base64-utf8-method-snippet>] \\
                   [--fieldFile Field.txt] \\
+                  [--fieldFileB64 <base64-utf8-path-to-field-file>] \\
                   [--methodFile Method.txt] \\
-                  [--outputDir .]
+                  [--methodFileB64 <base64-utf8-path-to-method-file>] \\
+                  [--outputDir .] \\
+                  [--outputDirB64 <base64-utf8-outputdir>]
 
             Notes:
               - --field and --method accept multi-word Java snippets; everything up to the next --flag
                 is treated as part of the declaration.
-              - --fieldFile / --methodFile read the entire file content (UTF-8) and override inline values.
-              - Both --outputDir and --outputdir are accepted.
+              - --*B64 variants decode Base64 as UTF-8 and behave like the non-B64 variant.
+              - If --fieldFile/--methodFile are provided (plain or B64), their file contents override inline snippets.
+              - Both --outputDir and --outputdir are accepted (and same for B64).
             """);
     }
 
@@ -129,6 +178,11 @@ public class DynamicDelegateCreator {
         // Resolve relative paths against the current working directory
         Path abs = p.isAbsolute() ? p : Paths.get(System.getProperty("user.dir")).resolve(p).normalize();
         return Files.readString(abs, StandardCharsets.UTF_8).trim();
+    }
+
+    private static String decodeB64Utf8(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8).trim();
     }
 
     public void writeDelegate(String parentClass,

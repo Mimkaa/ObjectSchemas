@@ -1,85 +1,115 @@
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 public class CreateTextFile {
 
     public static void main(String[] args) {
-        // Show help if no parameters provided
-        if (args.length == 0) {
-            System.out.println("""
-                Usage:
-                  java CreateTextFile --name <fileName> [--path <targetPath>] [--content <textContent>]
 
-                Examples:
-                  java CreateTextFile --name notes
-                  java CreateTextFile --name todo --path ./projects --content "Buy milk"
-                """);
+        if (args.length == 0) {
+            printUsage();
             return;
         }
 
         String fileName = null;
-        String targetPath = System.getProperty("user.dir"); // Default: current working directory
-        String content = ""; // Default: empty file
+        String targetPath = System.getProperty("user.dir"); // default
+        String content = ""; // default empty file
 
-        // Parse command-line arguments
+        // --------------------------------------------------
+        // Parse arguments
+        // --------------------------------------------------
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--name":
-                    if (i + 1 < args.length) {
-                        fileName = args[++i];
+
+                // ---------- name (plain + B64)
+                case "--name" -> {
+                    if (i + 1 < args.length) fileName = args[++i];
+                }
+                case "--nameB64" -> {
+                    if (i + 1 < args.length) fileName = decodeB64(args[++i]);
+                }
+
+                // ---------- path (plain + B64)
+                case "--path" -> {
+                    if (i + 1 < args.length && !args[i + 1].isEmpty()) {
+                        targetPath = args[++i];
                     }
-                    break;
-                case "--path":
-                    if (i + 1 < args.length) {
-                        String pathArg = args[++i];
-                        if (!pathArg.isEmpty()) { // Only override if non-empty
-                            targetPath = pathArg;
-                        }
-                    }
-                    break;
-                case "--content":
-                    if (i + 1 < args.length) {
-                        content = args[++i];
-                    }
-                    break;
+                }
+                case "--pathB64" -> {
+                    if (i + 1 < args.length) targetPath = decodeB64(args[++i]);
+                }
+
+                // ---------- content (plain + B64)
+                case "--content" -> {
+                    if (i + 1 < args.length) content = args[++i];
+                }
+                case "--contentB64" -> {
+                    if (i + 1 < args.length) content = decodeB64(args[++i]);
+                }
+
+                default -> {
+                    // ignore unknown flags
+                }
             }
         }
 
-        // Validate required parameter
-        if (fileName == null || fileName.isEmpty()) {
-            System.out.println("❌ Error: Missing required parameter --name");
+        // --------------------------------------------------
+        // Validate
+        // --------------------------------------------------
+        if (fileName == null || fileName.isBlank()) {
+            System.out.println("❌ Error: Missing required parameter --name / --nameB64");
             return;
         }
 
-        // Ensure .txt extension
         if (!fileName.endsWith(".txt")) {
             fileName += ".txt";
         }
 
-        // Construct full file path
         File file = new File(targetPath, fileName);
 
-        // Create file and write content
-        if (file.exists()) {
-            System.out.println("⚠️ File already exists: " + file.getAbsolutePath());
-        } else {
-            try {
-                // Ensure parent directories exist (only if path is non-empty)
-                if (file.getParentFile() != null) {
-                    file.getParentFile().mkdirs();
-                }
-
-                // Write content
-                try (FileWriter writer = new FileWriter(file)) {
-                    writer.write(content);
-                }
-
-                System.out.println("✅ File created successfully: " + file.getAbsolutePath());
-            } catch (IOException e) {
-                System.out.println("❌ Failed to create file: " + file.getAbsolutePath());
-                System.out.println("Error: " + e.getMessage());
+        // --------------------------------------------------
+        // Create file
+        // --------------------------------------------------
+        try {
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
             }
+
+            try (FileWriter writer = new FileWriter(file, StandardCharsets.UTF_8)) {
+                writer.write(content);
+            }
+
+            System.out.println("✅ File created successfully: " + file.getAbsolutePath());
+
+        } catch (IOException e) {
+            System.out.println("❌ Failed to create file: " + file.getAbsolutePath());
+            System.out.println("Error: " + e.getMessage());
         }
+    }
+
+    // --------------------------------------------------
+    // Helpers
+    // --------------------------------------------------
+    private static String decodeB64(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8);
+    }
+
+    private static void printUsage() {
+        System.out.println("""
+            CreateTextFile — Create a .txt file with optional content.
+
+            Usage:
+              java CreateTextFile \\
+                  --name <fileName> | --nameB64 <base64> \\
+                  [--path <dir> | --pathB64 <base64>] \\
+                  [--content <text> | --contentB64 <base64>]
+
+            Examples:
+              java CreateTextFile --name hello --content "Hi"
+              java CreateTextFile --nameB64 aGVsbG8= --contentB64 cHVibGljIGNsYXNzIFggeyB9
+            """);
     }
 }

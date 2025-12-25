@@ -4,10 +4,27 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 
+/**
+ * ClassFieldCloner - Copy a field definition from delegate into base class
+ *
+ * Added: Base64 variants for EVERY parameter (UTF-8 decoded):
+ *   --classNameToModifyB64
+ *   --delegateclassB64
+ *   --fieldB64
+ *
+ * Plain variants still work:
+ *   --classNameToModify
+ *   --delegateclass
+ *   --field
+ *
+ * Precedence (per param): plain and B64 both set the same variable; last one wins.
+ */
 public class ClassFieldCloner {
 
     public static void main(String[] args) {
@@ -17,15 +34,31 @@ public class ClassFieldCloner {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
+
+                // ----- classNameToModify (plain + B64)
                 case "--classNameToModify" -> {
                     if (i + 1 < args.length) classNameToModify = args[++i];
                 }
+                case "--classNameToModifyB64" -> {
+                    if (i + 1 < args.length) classNameToModify = decodeB64Utf8(args[++i]);
+                }
+
+                // ----- delegateclass (plain + B64)
                 case "--delegateclass" -> {
                     if (i + 1 < args.length) delegateClassName = args[++i];
                 }
+                case "--delegateclassB64" -> {
+                    if (i + 1 < args.length) delegateClassName = decodeB64Utf8(args[++i]);
+                }
+
+                // ----- field (plain + B64)
                 case "--field" -> {
                     if (i + 1 < args.length) fieldName = args[++i];
                 }
+                case "--fieldB64" -> {
+                    if (i + 1 < args.length) fieldName = decodeB64Utf8(args[++i]);
+                }
+
                 default -> {
                     // ignore unknown flags
                 }
@@ -54,11 +87,21 @@ public class ClassFieldCloner {
         System.out.println("      --delegateclass <FullyQualifiedDelegateClassName> \\");
         System.out.println("      --field <fieldName>");
         System.out.println();
+        System.out.println("Base64 variants:");
+        System.out.println("      --classNameToModifyB64 <base64-utf8> \\");
+        System.out.println("      --delegateclassB64 <base64-utf8> \\");
+        System.out.println("      --fieldB64 <base64-utf8>");
+        System.out.println();
         System.out.println("Example:");
         System.out.println("  java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassFieldCloner \\");
         System.out.println("      --classNameToModify Base \\");
-        System.out.println("      --delegateclass BaseDelegate \\");
-        System.out.println("      --field list");
+        System.out.println("      --delegateclass DynamicDelegate \\");
+        System.out.println("      --field target");
+    }
+
+    private static String decodeB64Utf8(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8).trim();
     }
 
     public void cloneField(String classNameToModify,
@@ -156,16 +199,13 @@ public class ClassFieldCloner {
     }
 
     private static FieldNode cloneFieldNode(FieldNode source) {
-        // For most cases, copying access, name, desc, signature, and value is enough.
-        FieldNode clone = new FieldNode(
+        return new FieldNode(
                 source.access,
                 source.name,
                 source.desc,
                 source.signature,
                 source.value
         );
-        // If you later need annotations or attributes, you can copy them here as well.
-        return clone;
     }
 
     private static void backupOnce(Path classFile) throws IOException {

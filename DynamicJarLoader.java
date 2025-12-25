@@ -1,8 +1,10 @@
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.io.IOException;
 import java.util.*;
+import java.util.Base64;
 
 public class DynamicJarLoader {
 
@@ -50,18 +52,31 @@ public class DynamicJarLoader {
         return base + "/" + path + "/" + jarName;
     }
 
+    // --------------------------------------------------
+    // B64 helper (UTF-8)
+    // --------------------------------------------------
+    private static String decodeB64Utf8(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8).trim();
+    }
+
     // 🧠 CLI Entry Point
     public static void main(String[] args) {
         if (args.length == 0) {
             System.out.println("""
                 Usage:
                   java DynamicJarLoader --library <group:artifact:version>
+                  java DynamicJarLoader --libraryB64 <base64-utf8-group:artifact:version>
 
                 Or (explicit form):
                   java DynamicJarLoader --group <groupId> --artifact <artifactId> --version <version>
 
-                Example:
+                Explicit Base64 variants (UTF-8 decoded):
+                  java DynamicJarLoader --groupB64 <b64> --artifactB64 <b64> --versionB64 <b64>
+
+                Examples:
                   java DynamicJarLoader --library org.json:json:20240303
+                  java DynamicJarLoader --libraryB64 b3JnLmpzb246anNvbjoyMDI0MDMwMw==
                   java DynamicJarLoader --group com.google.code.gson --artifact gson --version 2.11.0
                 """);
             return;
@@ -71,6 +86,8 @@ public class DynamicJarLoader {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
+
+                // ----- compact form (plain + B64)
                 case "--library" -> {
                     if (i + 1 < args.length) {
                         String[] parts = args[++i].split(":");
@@ -87,9 +104,36 @@ public class DynamicJarLoader {
                         return;
                     }
                 }
+                case "--libraryB64" -> {
+                    if (i + 1 < args.length) {
+                        String decoded = decodeB64Utf8(args[++i]);
+                        String[] parts = decoded.split(":");
+                        if (parts.length == 3) {
+                            groupId = parts[0];
+                            artifactId = parts[1];
+                            version = parts[2];
+                        } else {
+                            System.out.println("❌ Invalid decoded format for --libraryB64. Must decode to group:artifact:version");
+                            return;
+                        }
+                    } else {
+                        System.out.println("❌ Missing value for --libraryB64");
+                        return;
+                    }
+                }
+
+                // ----- explicit form (plain + B64)
                 case "--group" -> { if (i + 1 < args.length) groupId = args[++i]; }
                 case "--artifact" -> { if (i + 1 < args.length) artifactId = args[++i]; }
                 case "--version" -> { if (i + 1 < args.length) version = args[++i]; }
+
+                case "--groupB64" -> { if (i + 1 < args.length) groupId = decodeB64Utf8(args[++i]); }
+                case "--artifactB64" -> { if (i + 1 < args.length) artifactId = decodeB64Utf8(args[++i]); }
+                case "--versionB64" -> { if (i + 1 < args.length) version = decodeB64Utf8(args[++i]); }
+
+                default -> {
+                    // ignore unknown tokens
+                }
             }
         }
 

@@ -1,0 +1,17 @@
+from db_operator import DBOperator
+
+db = DBOperator()
+
+pid = db.insert_step(
+    "CreateTextFile",
+    {
+        "name": "MethodMain",
+        "content": 'public static void main(String[] args){ System.out.println("Hi"); }'
+    }
+)
+
+print(db.get_step(pid))
+print(db.get_last_n(2))
+
+db.delete_step(pid)
+db.close()

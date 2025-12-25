@@ -4,8 +4,10 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 
 public class ClassMethodCloner {
@@ -17,15 +19,31 @@ public class ClassMethodCloner {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
+
+                // ----- classNameToModify (plain + B64)
                 case "--classNameToModify" -> {
                     if (i + 1 < args.length) classNameToModify = args[++i];
                 }
+                case "--classNameToModifyB64" -> {
+                    if (i + 1 < args.length) classNameToModify = decodeB64Utf8(args[++i]);
+                }
+
+                // ----- delegateclass (plain + B64)
                 case "--delegateclass" -> {
                     if (i + 1 < args.length) delegateClassName = args[++i];
                 }
+                case "--delegateclassB64" -> {
+                    if (i + 1 < args.length) delegateClassName = decodeB64Utf8(args[++i]);
+                }
+
+                // ----- method (plain + B64)
                 case "--method" -> {
                     if (i + 1 < args.length) methodName = args[++i];
                 }
+                case "--methodB64" -> {
+                    if (i + 1 < args.length) methodName = decodeB64Utf8(args[++i]);
+                }
+
                 default -> {
                     // ignore unknown flags
                 }
@@ -54,11 +72,21 @@ public class ClassMethodCloner {
         System.out.println("      --delegateclass <FullyQualifiedDelegateClassName> \\");
         System.out.println("      --method <methodName>");
         System.out.println();
+        System.out.println("Base64 variants:");
+        System.out.println("      --classNameToModifyB64 <base64-utf8> \\");
+        System.out.println("      --delegateclassB64 <base64-utf8> \\");
+        System.out.println("      --methodB64 <base64-utf8>");
+        System.out.println();
         System.out.println("Example:");
         System.out.println("  java -cp .;asm-9.8.jar;asm-tree-9.8.jar ClassMethodCloner \\");
         System.out.println("      --classNameToModify FibonacciCalculator \\");
-        System.out.println("      --delegateclass FibonacciCalculatorDelegate \\");
+        System.out.println("      --delegateclass DynamicDelegate \\");
         System.out.println("      --method fib");
+    }
+
+    private static String decodeB64Utf8(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8).trim();
     }
 
     public void cloneMethod(String classNameToModify,
@@ -91,8 +119,8 @@ public class ClassMethodCloner {
         new ClassReader(delegateBytes).accept(delegateNode, 0);
 
         // Internal names, e.g. "Base" or "com/example/Base"
-        String baseInternalName = baseNode.name;          // ***
-        String delegateInternalName = delegateNode.name;  // ***
+        String baseInternalName = baseNode.name;
+        String delegateInternalName = delegateNode.name;
 
         // Find method in delegate
         MethodNode sourceMethod = findMethodByName(delegateNode, methodName);
@@ -103,7 +131,7 @@ public class ClassMethodCloner {
 
         System.out.println("  [FOUND] Delegate method: " + formatSig(sourceMethod));
 
-        // *** Create a remapped copy where all delegate-owner references become base-owner
+        // Create a remapped copy where all delegate-owner references become base-owner
         MethodNode remappedMethod = copyAndRemapOwner(sourceMethod, delegateInternalName, baseInternalName);
 
         // Look for matching method (name + descriptor) in base
@@ -195,7 +223,7 @@ public class ClassMethodCloner {
         source.accept(copy);
 
         // Then walk instructions and remap owners where needed
-        for (org.objectweb.asm.tree.AbstractInsnNode insn = copy.instructions.getFirst();
+        for (AbstractInsnNode insn = copy.instructions.getFirst();
              insn != null;
              insn = insn.getNext()) {
 

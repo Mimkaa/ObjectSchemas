@@ -5,12 +5,24 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * Fully reflection-safe DynamicClassCreator for modern Byte Buddy versions.
+ *
+ * Added: Base64 variants for EVERY CLI parameter (UTF-8 decoded):
+ *   --nameB64
+ *   --byteBuddyJarB64
+ *
+ * Plain variants still work:
+ *   --name
+ *   --byteBuddyJar
+ *
+ * If neither jar param is provided, it auto-detects byte-buddy*.jar in current dir (original behavior).
  */
 public class DynamicClassCreator {
 
@@ -69,36 +81,33 @@ public class DynamicClassCreator {
         try {
             Method varargs = methodBuilder.getClass().getMethod("withParameters", Class[].class);
             return varargs.invoke(methodBuilder, (Object) paramTypes);
-        } catch (NoSuchMethodException ignore) {
-            // try next variant
-        }
+        } catch (NoSuchMethodException ignore) {}
 
-        // Variant 2: withParameters(List) (of java.lang.reflect.Type; Class<?> implements Type)
+        // Variant 2: withParameters(List)
         try {
             Method withList = methodBuilder.getClass().getMethod("withParameters", List.class);
             List<Class<?>> asList = Collections.singletonList(String[].class);
             return withList.invoke(methodBuilder, asList);
-        } catch (NoSuchMethodException ignore) {
-            // try next variant
-        }
+        } catch (NoSuchMethodException ignore) {}
 
-        // Variant 3: withParameters(TypeList) using TypeList.ForLoadedTypes(Class<?>...)
+        // Variant 3: withParameters(TypeList)
         try {
             Class<?> typeList = Class.forName("net.bytebuddy.description.type.TypeList", true, bbLoader);
             Class<?> forLoadedTypes = Class.forName("net.bytebuddy.description.type.TypeList$ForLoadedTypes", true, bbLoader);
-            // ctor(Class<?>... types)
             java.lang.reflect.Constructor<?> tlCtor = forLoadedTypes.getConstructor(Class[].class);
             Object tl = tlCtor.newInstance((Object) paramTypes);
 
             Method withTL = methodBuilder.getClass().getMethod("withParameters", typeList);
             return withTL.invoke(methodBuilder, tl);
-        } catch (NoSuchMethodException ignore) {
-            // give up
-        }
+        } catch (NoSuchMethodException ignore) {}
 
-        // If everything failed, we just return the original builder
         System.out.println("⚠️ Failed to add parameters to main(String[] args); main() will be parameterless.");
         return methodBuilder;
+    }
+
+    private static String decodeB64Utf8(String b64) {
+        byte[] decoded = Base64.getDecoder().decode(b64);
+        return new String(decoded, StandardCharsets.UTF_8).trim();
     }
 
     /**
@@ -138,7 +147,6 @@ public class DynamicClassCreator {
             // Define private field 'name'
             // ------------------------------------------------------------------
             try {
-                // First try with TypeDefinition
                 Method defineFieldMethod = findMethodRecursive(
                         builder,
                         "defineField",
@@ -151,7 +159,6 @@ public class DynamicClassCreator {
                 builder = defineFieldMethod.invoke(builder, "name", stringTypeDefinition, Modifier.PRIVATE);
                 System.out.println("✅ Defined field 'name' with TypeDefinition");
             } catch (NoSuchMethodException e) {
-                // Fallback to Class
                 Method defineFieldMethod = findMethodRecursive(
                         builder,
                         "defineField",
@@ -169,7 +176,6 @@ public class DynamicClassCreator {
             Object methodBuilder;
 
             try {
-                // First try with TypeDefinition
                 Method defineMethod = findMethodRecursive(
                         builder,
                         "defineMethod",
@@ -182,7 +188,6 @@ public class DynamicClassCreator {
                 methodBuilder = defineMethod.invoke(builder, "sayHello", stringTypeDefinition, Modifier.PUBLIC);
                 System.out.println("✅ Defined method 'sayHello' with TypeDefinition");
             } catch (NoSuchMethodException e) {
-                // Fallback to Class
                 Method defineMethod = findMethodRecursive(
                         builder,
                         "defineMethod",
@@ -208,7 +213,6 @@ public class DynamicClassCreator {
             Object mainBuilder;
 
             try {
-                // Try defineMethod with TypeDefinition for return type (void)
                 Method defineMethod = findMethodRecursive(
                         builder,
                         "defineMethod",
@@ -228,7 +232,6 @@ public class DynamicClassCreator {
                 );
                 System.out.println("✅ Defined method 'main' with TypeDefinition");
             } catch (NoSuchMethodException e) {
-                // Fallback to Class return type
                 Method defineMethod = findMethodRecursive(
                         builder,
                         "defineMethod",
@@ -249,16 +252,13 @@ public class DynamicClassCreator {
             mainBuilder = addStringArrayParameter(mainBuilder, loader);
 
             // ------------------------------------------------------------------
-            // Implementation for main:
-            // Use StubMethod.INSTANCE (or instance() if available) -> does nothing, but valid body
+            // Implementation for main: StubMethod (does nothing)
             // ------------------------------------------------------------------
             Object stubImpl;
             try {
-                // Newer/alternate versions might have a static instance() method
                 Method stubInstanceMethod = stubMethodClass.getMethod("instance");
                 stubImpl = stubInstanceMethod.invoke(null);
             } catch (NoSuchMethodException ex) {
-                // ByteBuddy 1.15.x uses StubMethod.INSTANCE
                 Field instanceField = stubMethodClass.getField("INSTANCE");
                 stubImpl = instanceField.get(null);
             }
@@ -290,13 +290,61 @@ public class DynamicClassCreator {
         }
     }
 
+    private static void printUsage() {
+        System.out.println("""
+            DynamicClassCreator — Generate a stub .class using Byte Buddy.
+
+            Usage:
+              java DynamicClassCreator --name <ClassName>
+              java DynamicClassCreator --nameB64 <base64-utf8-classname>
+
+              (optional override ByteBuddy jar path)
+              java DynamicClassCreator --byteBuddyJar <path-to-byte-buddy-jar> --name <ClassName>
+              java DynamicClassCreator --byteBuddyJarB64 <base64-utf8-path> --nameB64 <base64-utf8-classname>
+
+            Notes:
+              - If no --byteBuddyJar is provided, it auto-finds byte-buddy*.jar in the current directory.
+              - *B64 flags decode Base64 as UTF-8 and behave like the non-B64 variant.
+            """);
+    }
+
     public static void main(String[] args) throws Exception {
-        String className = "MyGeneratedClass";
-        if (args.length >= 2 && "--name".equals(args[0])) {
-            className = args[1];
+        if (args.length == 0) {
+            printUsage();
+            return;
         }
 
-        File jar = findByteBuddyJar(); // automatically find the JAR
+        String className = "MyGeneratedClass";
+
+        // Optional jar override; otherwise auto-detect
+        String bbJarPath = null;
+
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+
+            switch (a) {
+                case "--name" -> {
+                    if (i + 1 < args.length) className = args[++i];
+                }
+                case "--nameB64" -> {
+                    if (i + 1 < args.length) className = decodeB64Utf8(args[++i]);
+                }
+                case "--byteBuddyJar" -> {
+                    if (i + 1 < args.length) bbJarPath = args[++i];
+                }
+                case "--byteBuddyJarB64" -> {
+                    if (i + 1 < args.length) bbJarPath = decodeB64Utf8(args[++i]);
+                }
+                default -> {
+                    // ignore unknown
+                }
+            }
+        }
+
+        File jar = (bbJarPath != null && !bbJarPath.isBlank())
+                ? new File(bbJarPath)
+                : findByteBuddyJar();
+
         DynamicClassCreator creator = new DynamicClassCreator(jar);
         creator.createDynamicClass(className);
     }
