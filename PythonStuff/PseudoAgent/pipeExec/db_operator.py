@@ -5,11 +5,19 @@
 # - per-script tables: 1:1 payload rows keyed by step_id (PRIMARY KEY + FK -> pipeline.step_id)
 # - payload_store: store large blobs (Java source etc) and reference by content_ref
 #
+# PLUS (runtime + planner support):
+# - pipelineLong: executor log (STEP/RESULT only)
+# - pipelineCheckpoints: semantic summaries every N steps
+#
 # Usage:
-#   python db_operator.py
-#   python db_operator.py stechen.db
+#   from db_operator import DBOperator
+#   op = DBOperator("stechen.db")
+#   op.ensure_runtime_tables()
+#   step_id = op.insert_step("DynamicJarLoader", {"library": "org.json:json:20240303"}, run_id="run1", step_index=1)
+#   op.log_pipeline_long("STEP", "RUN", "java DynamicJarLoader --libraryB64 ...", "Starting execution")
+#   op.close()
 
-import sys
+import time
 import sqlite3
 import hashlib
 from typing import Any, Dict, List, Optional
@@ -30,6 +38,29 @@ class DBOperator:
             pass
 
     # --------------------------------------------------
+    # small utils
+    # --------------------------------------------------
+    @staticmethod
+    def _ts() -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _cap(s: Optional[str], n: int) -> str:
+        if s is None:
+            return ""
+        s = str(s)
+        return s if len(s) <= n else s[:n] + " ... [truncated]"
+
+    @staticmethod
+    def _safe_table_name(name: str) -> str:
+        # Very defensive: allow only [A-Za-z0-9_]
+        out = []
+        for ch in str(name):
+            if ch.isalnum() or ch == "_":
+                out.append(ch)
+        return "".join(out)
+
+    # --------------------------------------------------
     # PAYLOAD STORE (for huge text, no base64)
     # --------------------------------------------------
     def put_payload(self, text: str, mime: str = "text/plain", payload_id: Optional[str] = None) -> str:
@@ -39,7 +70,7 @@ class DBOperator:
         """
         cur = self.conn.cursor()
         if payload_id is None:
-            h = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+            h = hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest()[:16]
             payload_id = f"payload:{h}"
 
         cur.execute(
@@ -47,7 +78,7 @@ class DBOperator:
             INSERT OR REPLACE INTO payload_store(payload_id, mime, text_content)
             VALUES (?, ?, ?)
             """,
-            (payload_id, mime, text),
+            (payload_id, mime, text or ""),
         )
         self.conn.commit()
         return payload_id
@@ -80,6 +111,7 @@ class DBOperator:
         Returns:
           step_id
         """
+        script_name = self._safe_table_name(script_name)
         cur = self.conn.cursor()
 
         # 1) pipeline row
@@ -87,12 +119,14 @@ class DBOperator:
             "INSERT INTO pipeline(script_name, run_id, step_index) VALUES (?,?,?)",
             (script_name, run_id, step_index),
         )
-        step_id = cur.lastrowid
+        step_id = int(cur.lastrowid)
 
         # 2) per-script payload row
         cols = [r["name"] for r in cur.execute(f"PRAGMA table_info({script_name})").fetchall()]
+        if not cols:
+            raise RuntimeError(f"Table '{script_name}' does not exist (schema not initialized?)")
         if "step_id" not in cols:
-            raise RuntimeError(f"Table {script_name} must contain column step_id")
+            raise RuntimeError(f"Table '{script_name}' must contain column step_id")
 
         payload_cols = [k for k in params.keys() if k in cols and k != "step_id"]
 
@@ -118,22 +152,22 @@ class DBOperator:
 
         row = cur.execute(
             "SELECT step_id, script_name, created_at, run_id, step_index FROM pipeline WHERE step_id=?",
-            (step_id,),
+            (int(step_id),),
         ).fetchone()
 
         if row is None:
             raise KeyError(f"No pipeline step {step_id}")
 
-        script_name = row["script_name"]
+        script_name = self._safe_table_name(row["script_name"])
 
         payload = cur.execute(
             f"SELECT * FROM {script_name} WHERE step_id=?",
-            (step_id,),
+            (int(step_id),),
         ).fetchone()
 
         payload_dict = dict(payload) if payload else {}
 
-        # Optional convenience: auto-resolve content_ref into content_text if desired
+        # Optional convenience: auto-resolve content_ref into _resolved_content
         if "content_ref" in payload_dict and payload_dict.get("content_ref"):
             ref = payload_dict["content_ref"]
             try:
@@ -142,7 +176,7 @@ class DBOperator:
                 payload_dict["_resolved_content"] = None
 
         return {
-            "step_id": step_id,
+            "step_id": int(step_id),
             "script_name": script_name,
             "created_at": row["created_at"],
             "run_id": row["run_id"],
@@ -158,108 +192,147 @@ class DBOperator:
 
         rows = cur.execute(
             "SELECT step_id FROM pipeline ORDER BY step_id DESC LIMIT ?",
-            (n,),
+            (int(n),),
         ).fetchall()
 
-        steps = [self.get_step(r["step_id"]) for r in rows]
+        steps = [self.get_step(int(r["step_id"])) for r in rows]
         if chronological:
             steps.reverse()
         return steps
+
+    # --------------------------------------------------
+    # GET ALL STEPS (chronological)
+    # --------------------------------------------------
+    def get_all_steps(self) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        rows = cur.execute("SELECT step_id FROM pipeline ORDER BY step_id ASC").fetchall()
+        return [self.get_step(int(r["step_id"])) for r in rows]
 
     # --------------------------------------------------
     # DELETE STEP (cascade will remove per-script row)
     # --------------------------------------------------
     def delete_step(self, step_id: int) -> None:
         cur = self.conn.cursor()
-        cur.execute("DELETE FROM pipeline WHERE step_id=?", (step_id,))
+        cur.execute("DELETE FROM pipeline WHERE step_id=?", (int(step_id),))
         self.conn.commit()
+
+    # --------------------------------------------------
+    # PIPELINE LONG (executor log: STEP / RESULT only)
+    # --------------------------------------------------
+    def ensure_pipeline_long(self) -> None:
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS pipelineLong (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                event_type TEXT NOT NULL,   -- STEP | RESULT
+                status TEXT NOT NULL,       -- RUN | SUCCESS | FAIL
+                command TEXT,
+                message TEXT
+            )
+        """)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelineLong_ts ON pipelineLong(ts)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelineLong_event ON pipelineLong(event_type)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelineLong_status ON pipelineLong(status)")
+        self.conn.commit()
+
+    def log_pipeline_long(self, event_type: str, status: str, command: str, message: str) -> None:
+        """
+        Deterministic logger:
+        - STEP: status should be RUN
+        - RESULT: status should be SUCCESS or FAIL
+        """
+        event_type = (event_type or "").strip()
+        status = (status or "").strip()
+
+        cmd = self._cap(command, 50_000)
+        msg = self._cap(message, 20_000)
+
+        self.conn.execute(
+            "INSERT INTO pipelineLong(ts, event_type, status, command, message) VALUES(?,?,?,?,?)",
+            (self._ts(), event_type, status, cmd, msg),
+        )
+        self.conn.commit()
+
+    # --------------------------------------------------
+    # CHECKPOINTS (semantic summaries)
+    # --------------------------------------------------
+    def ensure_checkpoints(self) -> None:
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS pipelineCheckpoints (
+                checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')),
+                run_id        TEXT,
+                step_id_from  INTEGER NOT NULL,
+                step_id_to    INTEGER NOT NULL,
+                n_steps       INTEGER NOT NULL,
+                summary       TEXT NOT NULL,
+                state_json    TEXT
+            )
+        """)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelineCheckpoints_run_id  ON pipelineCheckpoints(run_id)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelineCheckpoints_step_to ON pipelineCheckpoints(step_id_to)")
+        self.conn.commit()
+
+    def get_last_checkpoint(self) -> Optional[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        row = cur.execute(
+            """
+            SELECT checkpoint_id, created_at, run_id, step_id_from, step_id_to, n_steps, summary, state_json
+            FROM pipelineCheckpoints
+            ORDER BY checkpoint_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "checkpoint_id": int(row["checkpoint_id"]),
+            "created_at": row["created_at"],
+            "run_id": row["run_id"],
+            "step_id_from": int(row["step_id_from"]),
+            "step_id_to": int(row["step_id_to"]),
+            "n_steps": int(row["n_steps"]),
+            "summary": row["summary"],
+            "state_json": row["state_json"],
+        }
+
+    def insert_checkpoint(
+        self,
+        run_id: Optional[str],
+        step_id_from: int,
+        step_id_to: int,
+        n_steps: int,
+        summary: str,
+        state_json: Optional[str] = None,
+    ) -> int:
+        self.ensure_checkpoints()
+
+        summary_c = self._cap(summary, 15_000)
+        state_c = self._cap(state_json, 15_000) if state_json is not None else None
+
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO pipelineCheckpoints(run_id, step_id_from, step_id_to, n_steps, summary, state_json)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (run_id, int(step_id_from), int(step_id_to), int(n_steps), summary_c, state_c),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    # --------------------------------------------------
+    # Convenience: ensure runtime tables exist
+    # --------------------------------------------------
+    def ensure_runtime_tables(self) -> None:
+        self.ensure_pipeline_long()
+        self.ensure_checkpoints()
 
     # --------------------------------------------------
     # CLOSE
     # --------------------------------------------------
     def close(self) -> None:
-        self.conn.close()
-
-
-# ----------------------------------------------------------------------
-# Example: insert the "GuessGame" pipeline from your spec into stechen.db
-# (stores Java source in payload_store and references it via CreateTextFile.content_ref)
-# ----------------------------------------------------------------------
-def insert_guessgame_example(db: DBOperator, run_id: str = "spec:GuessGame") -> None:
-    idx = 1
-
-    def step(script: str, params: Dict[str, Any]):
-        nonlocal idx
-        db.insert_step(script, params, run_id=run_id, step_index=idx)
-        idx += 1
-
-    # Mandatory libraries
-    step("DynamicJarLoader", {"library": "net.bytebuddy:byte-buddy:1.15.3"})
-    step("DynamicJarLoader", {"library": "org.ow2.asm:asm:9.8"})
-    step("DynamicJarLoader", {"library": "org.ow2.asm:asm-tree:9.8"})
-    step("DynamicJarLoader", {"library": "org.ow2.asm:asm-commons:9.8"})
-    step("DynamicJarLoader", {"library": "org.ow2.asm:asm-util:9.8"})
-    step("DynamicJarLoader", {"library": "org.json:json:20240303"})
-
-    # Base class
-    step("DynamicClassCreator", {"class_name": "GuessGame"})
-
-    # Field file (store content in payload_store)
-    field_src = "public int target;"
-    field_ref = db.put_payload(field_src, payload_id="CreateTextFile:FieldGuessGameTarget")
-    step("CreateTextFile", {"file_name": "FieldGuessGameTarget", "content_ref": field_ref})
-    step("DynamicDelegateCreator", {"parent": "GuessGame", "field_file": "FieldGuessGameTarget.txt", "output_dir": "."})
-    step("ClassFieldCloner", {"class_name_to_modify": "GuessGame", "delegate_class": "DynamicDelegate", "field_name": "target"})
-
-    # initTarget()
-    init_src = "public void initTarget(){java.util.Random r=new java.util.Random();target=1+r.nextInt(100);}"
-    init_ref = db.put_payload(init_src, payload_id="CreateTextFile:MethodInitTarget")
-    step("CreateTextFile", {"file_name": "MethodInitTarget", "content_ref": init_ref})
-    step("DynamicDelegateCreator", {"parent": "GuessGame", "method_file": "MethodInitTarget.txt", "output_dir": "."})
-    step("ClassMethodCloner", {"class_name_to_modify": "GuessGame", "delegate_class": "DynamicDelegate", "method_name": "initTarget"})
-
-    # play()
-    play_src = (
-        "public void play(){java.util.Scanner sc=new java.util.Scanner(System.in);"
-        "System.out.println(\"Guess a number 1..100\");"
-        "while(true){System.out.print(\"> \");"
-        "if(!sc.hasNextInt()){sc.nextLine();System.out.println(\"Type an integer.\");continue;}"
-        "int g=sc.nextInt();"
-        "if(g<target){System.out.println(\"Higher\");}"
-        "else if(g>target){System.out.println(\"Lower\");}"
-        "else{System.out.println(\"Correct!\");break;}}}"
-    )
-    play_ref = db.put_payload(play_src, payload_id="CreateTextFile:MethodPlay")
-    step("CreateTextFile", {"file_name": "MethodPlay", "content_ref": play_ref})
-    step("DynamicDelegateCreator", {"parent": "GuessGame", "method_file": "MethodPlay.txt", "output_dir": "."})
-    step("ClassMethodCloner", {"class_name_to_modify": "GuessGame", "delegate_class": "DynamicDelegate", "method_name": "play"})
-
-    # main()
-    main_src = "public static void main(String[] args){GuessGame game=new GuessGame();game.initTarget();game.play();}"
-    main_ref = db.put_payload(main_src, payload_id="CreateTextFile:MethodMain")
-    step("CreateTextFile", {"file_name": "MethodMain", "content_ref": main_ref})
-    step("DynamicDelegateCreator", {"parent": "GuessGame", "method_file": "MethodMain.txt", "output_dir": "."})
-    step("ClassMethodCloner", {"class_name_to_modify": "GuessGame", "delegate_class": "DynamicDelegate", "method_name": "main"})
-
-    # Run
-    step("RunClass", {"class_name": "GuessGame"})
-
-
-def main():
-    db_path = sys.argv[1] if len(sys.argv) > 1 else "stechen.db"
-    db = DBOperator(db_path)
-
-    # Insert the example pipeline
-    insert_guessgame_example(db)
-
-    # Print last 5 steps (chronological)
-    last5 = db.get_last_n(5, chronological=True)
-    print("[OK] Inserted GuessGame example. Last 5 steps:")
-    for s in last5:
-        print(f"- step_id={s['step_id']} script={s['script_name']} step_index={s['step_index']} run_id={s['run_id']}")
-
-    db.close()
-
-
-if __name__ == "__main__":
-    main()
+        try:
+            self.conn.close()
+        except Exception:
+            pass

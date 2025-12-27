@@ -1,84 +1,83 @@
-# pipe_exec_daemon.py
+# run_all_pipeline_steps.py
 #
-# ✅ DB logging policy (STRICT):
-#   - Write to DB ONLY when:
-#       1) A block is about to be executed (the command)   -> event_type='STEP'
-#       2) The block finished (SUCCESS/FAIL)              -> event_type='RESULT'
-#   - NOTHING else goes to DB (no [JAVAC] OK, no [DL], no idle waiting, etc.)
+# Run ALL steps currently stored in pipeline table (ordered by step_id ASC),
+# using DBOperator to fetch payload for each step and executing the corresponding
+# Java tool fetched from GitHub (cached locally).
 #
-# Console output remains verbose (as before).
-
-import sys
+# ✅ Behavior:
+# - Iterates through ALL pipeline records (oldest -> newest by step_id)
+# - For each step:
+#     - Build argv using B64 flags (Python encodes values, Java decodes)
+#     - Download <Script>.java from GitHub if not cached
+#     - Compile with jars in WORK_DIR on classpath
+#     - Run java tool
+#     - Log ONLY STEP + RESULT into pipelineLong
+# - DOES NOT delete or modify pipeline table (pure "replay")
+#
+# Usage:
+#   python run_all_pipeline_steps.py
+#
+# Optional env:
+#   STECHEN_DB_PATH, STECHEN_WORK_DIR, STECHEN_GITHUB_BASE_RAW
+#
+# Notes:
+# - Requires your Java tools to support the *B64 flags used below.
+# - CreateTextFile supports --contentB64 (decoded inside Java).
+# - CreateTextFileFromBase64 supports --contentB64 (already base64, passed raw).
+#
 import os
-import re
+import sys
+import time
 import base64
 import subprocess
 import urllib.request
-import time
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Tuple
 
-# =========================================================
-# Fix Windows console Unicode crashes (cp1252 etc.)
-# =========================================================
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-# =========================================================
-# HARD-CODED PATHS (relative to this file)
-# =========================================================
-PIPE_EXEC_DIR = Path(__file__).resolve().parent           # ...\PseudoAgent\pipeExec
-BASE_DIR = PIPE_EXEC_DIR.parent                           # ...\PseudoAgent
+from db_operator import DBOperator  # db_operator.py in same folder
 
-sys.path.insert(0, str(BASE_DIR))
-from stechen_db import StechenDB  # noqa: E402
-
-DB_FILE = BASE_DIR / "stechen.db"
-PIPELINE_FILE = PIPE_EXEC_DIR / "pipeline.txt"
-WORK_DIR = BASE_DIR
-
-# ==============================================
+# -----------------------------
 # CONFIG
-# ==============================================
-GITHUB_BASE_RAW = "https://raw.githubusercontent.com/Mimkaa/ObjectSchemas/main"
+# -----------------------------
+DB_PATH = os.getenv("STECHEN_DB_PATH", "stechen.db")
+WORK_DIR = Path(os.getenv("STECHEN_WORK_DIR", ".")).resolve()
+GITHUB_BASE_RAW = os.getenv(
+    "STECHEN_GITHUB_BASE_RAW",
+    "https://raw.githubusercontent.com/Mimkaa/ObjectSchemas/main"
+)
 
 JAVA_CMD = "java"
 JAVAC_CMD = "javac"
 CLASSPATH_SEP = ";" if os.name == "nt" else ":"
 
-POLL_INTERVAL_SEC = 0.5
-IDLE_PRINT_EVERY_SEC = 10.0
-
-MAX_DB_OUTPUT_CHARS = 200_000
-
-# =========================================================
-# DB RUNTIME LOGGING (ONLY STEP + RESULT)
-# =========================================================
 PIPELINE_LONG_TABLE = "pipelineLong"
-_DB_CONN: sqlite3.Connection | None = None
+MAX_DB_MSG = 20_000
+MAX_DB_CMD = 50_000
 
 
+# =========================================================
+# DB logging (STEP + RESULT only)
+# =========================================================
 def _ts() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def ensure_pipeline_long_table(conn: sqlite3.Connection) -> None:
-    """
-    Minimal, planner-friendly table:
-    - exactly 2 rows per executed block (STEP + RESULT)
-    """
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {PIPELINE_LONG_TABLE} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT NOT NULL,
-            event_type TEXT NOT NULL,   -- 'STEP' or 'RESULT'
-            status TEXT NOT NULL,       -- 'RUN' | 'SUCCESS' | 'FAIL'
-            command TEXT,               -- full command for STEP, repeated for RESULT (optional but useful)
-            message TEXT                -- short human message / error summary
+            event_type TEXT NOT NULL,   -- STEP | RESULT
+            status TEXT NOT NULL,       -- RUN | SUCCESS | FAIL
+            command TEXT,
+            message TEXT
         )
     """)
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{PIPELINE_LONG_TABLE}_ts ON {PIPELINE_LONG_TABLE}(ts)")
@@ -87,117 +86,86 @@ def ensure_pipeline_long_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _db_insert_event(conn: sqlite3.Connection, event_type: str, status: str, command: str | None, message: str) -> None:
-    ts = _ts()
-    msg = (message or "")
+def db_event(conn: sqlite3.Connection, event_type: str, status: str, command: str, message: str) -> None:
     cmd = (command or "")
+    msg = (message or "")
 
-    # keep rows reasonably sized
-    if len(msg) > 20_000:
-        msg = msg[:20_000] + " ... [truncated]"
-    if len(cmd) > 50_000:
-        cmd = cmd[:50_000] + " ... [truncated]"
+    if len(cmd) > MAX_DB_CMD:
+        cmd = cmd[:MAX_DB_CMD] + " ... [truncated]"
+    if len(msg) > MAX_DB_MSG:
+        msg = msg[:MAX_DB_MSG] + " ... [truncated]"
 
-    for _ in range(5):
-        try:
-            conn.execute(
-                f"INSERT INTO {PIPELINE_LONG_TABLE}(ts, event_type, status, command, message) VALUES(?,?,?,?,?)",
-                (ts, event_type, status, cmd, msg),
-            )
-            conn.commit()
-            return
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower():
-                time.sleep(0.05)
-                continue
-            raise
-
-
-def db_step(command: str) -> None:
-    """
-    Write STEP row to DB.
-    """
-    global _DB_CONN
-    if _DB_CONN is None:
-        return
-    try:
-        _db_insert_event(_DB_CONN, "STEP", "RUN", command, "Starting execution")
-    except Exception:
-        pass
-
-
-def db_result(command: str, ok: bool, error_summary: str = "") -> None:
-    """
-    Write RESULT row to DB.
-    """
-    global _DB_CONN
-    if _DB_CONN is None:
-        return
-    try:
-        if ok:
-            _db_insert_event(_DB_CONN, "RESULT", "SUCCESS", command, "Executed successfully")
-        else:
-            msg = error_summary.strip() or "Execution failed"
-            _db_insert_event(_DB_CONN, "RESULT", "FAIL", command, msg)
-    except Exception:
-        pass
+    conn.execute(
+        f"INSERT INTO {PIPELINE_LONG_TABLE}(ts, event_type, status, command, message) VALUES(?,?,?,?,?)",
+        (_ts(), event_type, status, cmd, msg),
+    )
+    conn.commit()
 
 
 # =========================================================
-# CONSOLE LOGGING (prints only)
+# Runner helpers
 # =========================================================
-def log(*args, sep=" ", end="\n") -> None:
-    msg = sep.join(str(a) for a in args)
+def log(*args):
     try:
-        print(msg, end=end)
+        print(*args)
     except Exception:
         pass
 
-# ==============================================
-# CLASSPATH BUILDER (WORK_DIR + all jars)
-# ==============================================
+
+def b64_utf8(s: str) -> str:
+    return base64.b64encode((s or "").encode("utf-8", errors="replace")).decode("ascii")
+
+
 def build_classpath() -> str:
     jars = [str(p) for p in WORK_DIR.glob("*.jar")]
     return CLASSPATH_SEP.join([str(WORK_DIR)] + jars)
 
-# ==============================================
-# DOWNLOAD JAVA FILE (IN WORK_DIR)
-# ==============================================
+
 def download_java(script_name: str) -> Path:
     java_filename = f"{script_name}.java"
     local_path = WORK_DIR / java_filename
-
     if local_path.exists():
-        log(f"[CACHE] Using cached {java_filename}")
         return local_path
 
     url = f"{GITHUB_BASE_RAW}/{java_filename}"
-    log(f"[DL] Downloading {java_filename} from {url}")
-
+    log(f"[DL] {java_filename} <- {url}")
     try:
         with urllib.request.urlopen(url) as resp, open(local_path, "wb") as out:
             out.write(resp.read())
     except Exception as e:
         raise FileNotFoundError(f"Failed to download {java_filename}: {e}")
 
-    log(f"[DL] Saved {local_path}")
     return local_path
 
-# ==============================================
-# COMPILE JAVA SOURCE (WORK_DIR)
-# ==============================================
-def compile_java(script_name: str) -> str:
+
+def compile_java(script_name: str) -> None:
     java_filename = f"{script_name}.java"
     src_path = WORK_DIR / java_filename
-
     if not src_path.exists():
-        raise FileNotFoundError(f"{java_filename} not found at {src_path}")
+        raise FileNotFoundError(f"{java_filename} not found in {WORK_DIR}")
 
-    classpath = build_classpath()
-    cmd = [JAVAC_CMD, "-cp", classpath, java_filename]
+    cp = build_classpath()
+    cmd = [JAVAC_CMD, "-cp", cp, java_filename]
 
-    log(f"[JAVAC] Compiling {java_filename} ...")
-    result = subprocess.run(
+    res = subprocess.run(
+        cmd,
+        cwd=str(WORK_DIR),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if res.returncode != 0:
+        combined = (res.stdout or "") + ("\n" if res.stdout and res.stderr else "") + (res.stderr or "")
+        raise RuntimeError(f"[JAVAC] failed for {java_filename}\n{combined}")
+
+
+def run_java(script_name: str, argv: List[str]) -> str:
+    cp = build_classpath()
+    cmd = [JAVA_CMD, "-cp", cp, script_name] + argv
+
+    log("[JAVA] Running:", " ".join(cmd))
+    res = subprocess.run(
         cmd,
         cwd=str(WORK_DIR),
         capture_output=True,
@@ -206,312 +174,169 @@ def compile_java(script_name: str) -> str:
         errors="replace",
     )
 
-    combined = ""
-    if result.stdout:
-        combined += result.stdout
-    if result.stderr:
-        if combined and not combined.endswith("\n"):
-            combined += "\n"
-        combined += result.stderr
-
-    if result.returncode != 0:
-        log("[JAVAC] ERROR")
-        if combined:
-            log(combined)
-        raise RuntimeError(f"Compilation failed for {java_filename}\n{combined}")
-
-    log("[JAVAC] OK")
-    return combined
-
-# ==============================================
-# JAVA RUNNER (WORK_DIR)
-# ==============================================
-def run_java(script_name: str, raw_params) -> str:
-    classpath = build_classpath()
-    cmd = [JAVA_CMD, "-cp", classpath, script_name] + raw_params
-
-    log(f"[JAVA] Running: {' '.join(cmd)}")
-    result = subprocess.run(
-        cmd,
-        cwd=str(WORK_DIR),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-
-    combined = ""
-    if result.stdout:
-        combined += result.stdout
-    if result.stderr:
-        if combined and not combined.endswith("\n"):
-            combined += "\n"
-        combined += result.stderr
-
-    if result.returncode != 0:
-        raise RuntimeError(f"{script_name} exited with code {result.returncode}\n{combined}")
+    combined = (res.stdout or "") + ("\n" if res.stdout and res.stderr else "") + (res.stderr or "")
+    if res.returncode != 0:
+        raise RuntimeError(f"[JAVA] {script_name} exited with {res.returncode}\n{combined}")
 
     return combined
 
-# ==============================================
-# BASE64 FLAG DECODER
-# ==============================================
-def decode_b64_flags(params):
-    out, i = [], 0
-    while i < len(params):
-        flag = params[i]
 
-        if flag.startswith("--") and flag.lower().endswith(("b64", "base64")):
-            if i + 1 >= len(params):
-                raise RuntimeError(f"{flag} missing value")
+# =========================================================
+# Convert DB step -> CLI argv (B64 flags)
+# Flags must match your UPDATED Java tools.
+# =========================================================
+def build_argv_for_step(step: Dict[str, Any]) -> Tuple[str, List[str], str]:
+    script = step["script_name"]
+    payload = step.get("payload") or {}
 
-            decoded = base64.b64decode(params[i + 1]).decode("utf-8", errors="replace")
-            clean_flag = flag[:-3] if flag.lower().endswith("b64") else flag[:-6]
+    step_id = step["step_id"]
+    run_id = step.get("run_id")
+    step_index = step.get("step_index")
+    prefix = f"[step_id={step_id} run_id={run_id} step_index={step_index}]"
 
-            out += [clean_flag, decoded]
-            i += 2
-            continue
+    mapping: Dict[str, List[Tuple[str, str]]] = {
+        "DynamicJarLoader": [("library", "--libraryB64")],
+        "DynamicClassCreator": [("class_name", "--nameB64")],
+        "CreateDirectory": [("directory_name", "--nameB64"), ("target_path", "--pathB64")],
+        "CurrentDirUpdate": [("dirname", "--dirnameB64")],
 
-        out.append(flag)
-        i += 1
+        "CreateTextFile": [("file_name", "--nameB64"), ("target_path", "--pathB64")],
+        "CreateTextFileFromBase64": [("file_name", "--nameB64"), ("target_path", "--pathB64")],
 
-    return out
+        "DynamicDelegateCreator": [
+            ("parent", "--parentB64"),
+            ("field_file", "--fieldFileB64"),
+            ("method_file", "--methodFileB64"),
+            ("output_dir", "--outputDirB64"),
+        ],
+        "ClassMethodCloner": [
+            ("class_name_to_modify", "--classNameToModifyB64"),
+            ("delegate_class", "--delegateclassB64"),
+            ("method_name", "--methodB64"),
+        ],
+        "ClassFieldCloner": [
+            ("class_name_to_modify", "--classNameToModifyB64"),
+            ("delegate_class", "--delegateclassB64"),
+            ("field_name", "--fieldB64"),
+        ],
+        "RunClass": [
+            ("class_name", "--classB64"),
+            ("args_text", "--argsB64"),
+        ],
+    }
 
-# ==============================================
-# PROCESS ONE BLOCK
-#   Returns: (command_text_for_db, combined_output)
-# ==============================================
-def process_block(block_lines):
-    logical = [l.rstrip() for l in block_lines if l.strip() and not l.lstrip().startswith("#")]
-    if not logical:
-        return None, None
+    argv: List[str] = []
 
-    command = " ".join(logical).strip()
+    if script in mapping:
+        for col, flag in mapping[script]:
+            v = payload.get(col)
+            if v is None or str(v).strip() == "":
+                continue
+            argv += [flag, b64_utf8(str(v))]
+    else:
+        # fallback: --<col>B64 for every payload key (except step_id)
+        for k, v in payload.items():
+            if k in ("step_id",) or v is None:
+                continue
+            argv += [f"--{k}B64", b64_utf8(str(v))]
 
-    # Console only (verbose)
-    log("")
-    log("==============================")
-    log(f"[STEP] {command}")
-    log("==============================")
+    # CreateTextFileFromBase64: already base64 -> pass raw as --contentB64
+    if script == "CreateTextFileFromBase64":
+        v = payload.get("content_b64")
+        if v:
+            argv += ["--contentB64", str(v)]
 
-    combined_output = ""
+    # CreateTextFile: resolve content_ref -> _resolved_content -> content_text
+    if script == "CreateTextFile":
+        text = None
+        if payload.get("_resolved_content") is not None:
+            text = payload.get("_resolved_content")
+        elif payload.get("content_text"):
+            text = payload.get("content_text")
 
-    # Special handling: --SomethingB64 (raw tail becomes base64 payload)
-    m = re.search(r'(?<!\S)(--[A-Za-z0-9_-]+(?:B64|Base64))\s+', command)
-    if m:
-        flag = m.group(1)
-        head = command[:m.start()].strip()
-        raw_tail = command[m.end():]
+        if text is not None:
+            argv += ["--contentB64", b64_utf8(str(text))]
 
-        parts = head.split()
-        script_name = parts[0]
-        params = parts[1:]
-
-        encoded = base64.b64encode(raw_tail.encode("utf-8")).decode("ascii")
-        params += [flag, encoded]
-        params = decode_b64_flags(params)
-
-        download_java(script_name)
-        comp_out = compile_java(script_name)
-        run_out = run_java(script_name, params)
-
-        if comp_out:
-            combined_output += "[javac]\n" + comp_out
-            if not combined_output.endswith("\n"):
-                combined_output += "\n"
-        if run_out:
-            combined_output += "[java]\n" + run_out
-
-        return command, combined_output
-
-    # Normal case
-    parts = command.split()
-    script_name = parts[0]
-    params = decode_b64_flags(parts[1:])
-
-    download_java(script_name)
-    comp_out = compile_java(script_name)
-    run_out = run_java(script_name, params)
-
-    if comp_out:
-        combined_output += "[javac]\n" + comp_out
-        if not combined_output.endswith("\n"):
-            combined_output += "\n"
-    if run_out:
-        combined_output += "[java]\n" + run_out
-
-    return command, combined_output
-
-# ==============================================
-# BLOCK PARSING (2 blank lines = separator)
-# ==============================================
-def parse_blocks_from_text(text: str):
-    lines = text.splitlines()
-    blocks, current, blanks = [], [], 0
-
-    for line in lines:
-        if line.strip() == "":
-            blanks += 1
-            if blanks == 2:
-                blocks.append(current)
-                current = []
-                blanks = 0
-            else:
-                current.append(line)
-            continue
-
-        blanks = 0
-        current.append(line)
-
-    if current:
-        blocks.append(current)
-
-    def is_effectively_empty(b):
-        return not any(l.strip() and not l.lstrip().startswith("#") for l in b)
-
-    blocks = [b for b in blocks if not is_effectively_empty(b)]
-    return blocks
+    human_cmd = f"{prefix} java {script} " + " ".join(argv)
+    return script, argv, human_cmd.strip()
 
 
-def blocks_to_text(blocks):
-    out_lines = []
-    for bi, block in enumerate(blocks):
-        while block and block[-1].strip() == "":
-            block = block[:-1]
-        out_lines.extend(block)
-        if bi != len(blocks) - 1:
-            out_lines.append("")
-            out_lines.append("")
-    return "\n".join(out_lines) + ("\n" if out_lines else "")
-
-# ==============================================
-# ATOMIC FILE WRITE
-# ==============================================
-def atomic_write(path: Path, text: str):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8", errors="replace")
-    tmp.replace(path)
-
-# ==============================================
-# CONSUME ONE BLOCK
-# ==============================================
-def try_consume_one_block(pipeline_path: Path):
-    pipeline_path.parent.mkdir(parents=True, exist_ok=True)
-    if not pipeline_path.exists():
-        pipeline_path.write_text("", encoding="utf-8", errors="replace")
-
-    text = pipeline_path.read_text(encoding="utf-8", errors="replace")
-    blocks = parse_blocks_from_text(text)
-    if not blocks:
-        return None, None
-
-    first = blocks[0]
-    rest = blocks[1:]
-    atomic_write(pipeline_path, blocks_to_text(rest))
-    return first, rest
-
-
-def put_block_back_on_top(pipeline_path: Path, block_lines):
-    text = pipeline_path.read_text(encoding="utf-8", errors="replace") if pipeline_path.exists() else ""
-    blocks = parse_blocks_from_text(text)
-    blocks = [block_lines] + blocks
-    atomic_write(pipeline_path, blocks_to_text(blocks))
-
-
-def cap_output(s: Optional[str]) -> Optional[str]:
-    if s is None:
-        return None
-    if len(s) <= MAX_DB_OUTPUT_CHARS:
-        return s
-    return s[:MAX_DB_OUTPUT_CHARS] + "\n... [truncated]"
-
-# ==============================================
-# MAIN DAEMON LOOP
-# ==============================================
+# =========================================================
+# Main (run all)
+# =========================================================
 def main():
-    global _DB_CONN
+    log("[RUN] Running ALL pipeline steps (one-shot replay), ordered by step_id ASC.")
+    log(f"[RUN] DB_PATH:  {Path(DB_PATH).resolve()}")
+    log(f"[RUN] WORK_DIR: {WORK_DIR}")
+    log(f"[RUN] GITHUB:   {GITHUB_BASE_RAW}")
+    log("[RUN] NOTE: pipeline table is NOT modified (nothing deleted).")
 
-    # Open sqlite connection for runtime STEP/RESULT logs only
-    _DB_CONN = sqlite3.connect(str(DB_FILE), timeout=30.0, isolation_level=None)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        _DB_CONN.execute("PRAGMA journal_mode=WAL;")
-        _DB_CONN.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
     except Exception:
         pass
+    ensure_pipeline_long_table(conn)
 
-    ensure_pipeline_long_table(_DB_CONN)
+    op = DBOperator(DB_PATH)
 
-    log("[EXEC] Pipe executor daemon started.")
-    log(f"[EXEC] Watching:  {PIPELINE_FILE}")
-    log(f"[EXEC] DB:        {DB_FILE}")
-    log(f"[EXEC] WORK_DIR:  {WORK_DIR}")
-    log("[EXEC] Behavior: consume first block, execute it, remove it from file.")
-    log("[EXEC] If file is empty: wait.\n")
+    try:
+        # Get ALL step_ids in chronological order (oldest -> newest)
+        cur = op.conn.cursor()
+        rows = cur.execute("SELECT step_id FROM pipeline ORDER BY step_id ASC").fetchall()
+        if not rows:
+            log("[RUN] No pipeline steps found.")
+            return
 
-    pipeline_path = PIPELINE_FILE
-    last_idle_print = 0.0
+        step_ids = [r["step_id"] for r in rows]
+        log(f"[RUN] Found {len(step_ids)} steps.")
 
-    db = StechenDB(str(DB_FILE))
-    db.init()
-
-    while True:
-        block, _ = try_consume_one_block(pipeline_path)
-
-        if block is None:
-            now = time.time()
-            if now - last_idle_print >= IDLE_PRINT_EVERY_SEC:
-                log("[EXEC] pipeline.txt empty - waiting...")
-                last_idle_print = now
-            time.sleep(POLL_INTERVAL_SEC)
-            continue
-
-        command_text: Optional[str] = None
-        combined_output: Optional[str] = None
-
-        try:
-            # Build command string early so we can log STEP even if execution fails later
-            logical = [l.rstrip() for l in block if l.strip() and not l.lstrip().startswith("#")]
-            command_text = " ".join(logical).strip() if logical else None
-
-            if command_text:
-                db_step(command_text)  # ✅ DB: STEP only
-
-            command_text, combined_output = process_block(block)
-
-            if command_text is not None:
-                db.log_command(command_text, "SUCCESS", cap_output(combined_output))
-                db_result(command_text, ok=True)  # ✅ DB: RESULT only
-
-            log("[EXEC] Block executed and removed from pipeline.txt")
-
-        except Exception as e:
-            # Still log to your existing commands table (StechenDB)
-            fail_output = ""
-            if combined_output:
-                fail_output += combined_output
-                if not fail_output.endswith("\n"):
-                    fail_output += "\n"
-            fail_output += f"Exception: {e}"
-
-            if command_text is None:
-                raw_block = "\n".join(block)
-                db.log_command(raw_block, "FAIL", cap_output(fail_output))
-                db_result(raw_block, ok=False, error_summary=str(e))  # ✅ DB: RESULT only
-            else:
-                db.log_command(command_text, "FAIL", cap_output(fail_output))
-                db_result(command_text, ok=False, error_summary=str(e))  # ✅ DB: RESULT only
-
-            log("[EXEC] Block failed:", e)
-
-            # Put it back so it isn't lost
+        for idx, step_id in enumerate(step_ids, start=1):
+            human_cmd = "<unknown>"
             try:
-                put_block_back_on_top(pipeline_path, block)
-                log("[EXEC] Put failed block back on top of pipeline.txt")
-            except Exception as e2:
-                log("[EXEC] Could not restore block to pipeline.txt:", e2)
+                step = op.get_step(step_id)
+                script, argv, human_cmd = build_argv_for_step(step)
 
-            time.sleep(1.0)
+                log("")
+                log("=" * 60)
+                log(f"[RUN] ({idx}/{len(step_ids)}) step_id={step_id} script={script}")
+                log("=" * 60)
+
+                # STEP log
+                db_event(conn, "STEP", "RUN", human_cmd, "Starting execution")
+
+                # Download + compile + run
+                download_java(script)
+                compile_java(script)
+                out = run_java(script, argv)
+
+                # RESULT log
+                msg = out.strip() if out.strip() else "Executed successfully"
+                db_event(conn, "RESULT", "SUCCESS", human_cmd, msg)
+
+            except Exception as e:
+                # RESULT fail
+                try:
+                    db_event(conn, "RESULT", "FAIL", human_cmd, str(e))
+                except Exception:
+                    pass
+                log("[FAIL]", e)
+                # Stop at first failure (safer for STECHEN)
+                raise
+
+        log("")
+        log("[OK] Finished running all pipeline steps.")
+
+    finally:
+        try:
+            op.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
