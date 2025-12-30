@@ -1,1 +1,1 @@
-make a minesweeper game in terminal
+make a small program that will be taking images from the web cam every 1 second and convert it to askii and print to cmd

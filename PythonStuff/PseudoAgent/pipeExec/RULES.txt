@@ -116,6 +116,7 @@ description: executes the main method of a compiled class
 usage:
     RunClass --class <ClassName>
 
+YOU ARE ALLOWED TO USE ONLY THESE SCRIPTS!!!
 
 GLOBAL PIPE RULES
 -----------------

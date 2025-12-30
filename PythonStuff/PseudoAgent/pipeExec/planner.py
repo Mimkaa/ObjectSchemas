@@ -1,16 +1,18 @@
 # planner.py
 #
-# STECHEN Planner (DB-driven, schema-safe)
+# STECHEN Planner (DB-driven, schema-safe) — NO CHECKPOINT WRITES
 #
-# ✅ Fixes included:
-# 1) Handles empty DB (no pipeline steps yet) by seeding the FIRST mandatory step:
+# ✅ Behavior:
+# 1) If pipeline is empty → seed FIRST mandatory step:
 #       DynamicJarLoader { "library": "net.bytebuddy:byte-buddy:1.15.3" }
-# 2) Fixes row→dict conversion robustly (sqlite3.Row OR tuple)
-# 3) Adds schema introspection:
-#       - auto-alias common wrong keys (e.g. name -> class_name)
-#       - validates NOT NULL + no-default columns before insert_step()
-#       - (optional) prints a clear error if planner output is missing required params
-# 4) Still writes pipelineCheckpoints row after inserting the step
+#    (and EXIT)  — no OpenAI call, no checkpoints written
+# 2) If pipeline not empty → build the SAME planner input as before:
+#       RULES + GOAL + ALL EXISTING CHECKPOINTS (as context) + last executor logs
+#       + fresh summarizer output + last N evidence
+#    Then ask GPT for EXACTLY ONE next step JSON and insert it into the DB.
+#
+# ❌ Removed:
+# - Any writes to pipelineCheckpoints (planner never inserts checkpoints)
 #
 # Usage:
 #   python planner.py
@@ -18,7 +20,7 @@
 # Env:
 #   OPENAI_API_KEY (required unless DB empty and seeding first step)
 #   STECHEN_DB_PATH, STECHEN_RULES_FILE, STECHEN_GOAL_FILE
-#   STECHEN_N_STEPS (default 5)
+#   STECHEN_N_STEPS (default 5)   [kept, but summary/evidence overridden below]
 #   STECHEN_MODEL (default "gpt-5.2")
 #   STECHEN_RUN_ID (optional fallback)
 #
@@ -30,7 +32,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
-
 from db_operator import DBOperator
 
 
@@ -48,20 +49,23 @@ DEFAULT_RUN_ID = os.getenv("STECHEN_RUN_ID", None)
 PIPELINE_LONG_TABLE = "pipelineLong"
 CHECKPOINTS_TABLE = "pipelineCheckpoints"
 
+# caps removed logically by making _cap a no-op
 MAX_RULES_CHARS = 80_000
 MAX_GOAL_CHARS = 20_000
 MAX_EVIDENCE_CHARS = 25_000
 MAX_SUMMARY_CHARS = 15_000
 MAX_PLAN_JSON_CHARS = 15_000
 
-# All-checkpoints context caps
 MAX_CHECKPOINTS_CONTEXT_CHARS = 60_000
 MAX_ONE_CHECKPOINT_SUMMARY_CHARS = 6_000
 MAX_ONE_CHECKPOINT_STATE_CHARS = 2_000
 
-# summarizer caps (payload evidence)
 MAX_PAYLOAD_CHARS = 10_000
 MAX_VALUE_CHARS = 4_000
+
+# Force these per your request:
+FRESH_SUMMARY_N = 50     # <-- fresh summary is always last 50
+EVIDENCE_N = 5           # <-- evidence is last 5 steps
 
 # Seed behavior: if pipeline empty, we insert this as the first step
 SEED_FIRST_STEP = {
@@ -76,10 +80,10 @@ SEED_FIRST_STEP = {
 # small utils
 # -----------------------------
 def _cap(s: Optional[str], n: int) -> str:
+    # ✅ TRUNCATION REMOVED: always return full text
     if s is None:
         return ""
-    s = str(s)
-    return s if len(s) <= n else s[:n] + "\n... [truncated]"
+    return str(s)
 
 
 def _read_text(path: Path) -> str:
@@ -108,15 +112,10 @@ def log(*args) -> None:
 
 
 def row_to_dict(cur: sqlite3.Cursor, row: Any) -> Dict[str, Any]:
-    """
-    Robust row->dict conversion whether row is sqlite3.Row or tuple.
-    IMPORTANT: for tuple rows, we use cur.description from the cursor that fetched it.
-    """
     if row is None:
         return {}
     if isinstance(row, sqlite3.Row):
         return dict(row)
-    # tuple-like
     cols = [d[0] for d in (cur.description or [])]
     return dict(zip(cols, row))
 
@@ -125,7 +124,6 @@ def row_to_dict(cur: sqlite3.Cursor, row: Any) -> Dict[str, Any]:
 # DB reads: pipelineLong + checkpoints
 # -----------------------------
 def ensure_schema_tables_exist(conn: sqlite3.Connection) -> None:
-    # Defensive: your init script already creates these.
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {PIPELINE_LONG_TABLE} (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,11 +150,7 @@ def ensure_schema_tables_exist(conn: sqlite3.Connection) -> None:
 
 
 def get_last_pipeline_long(conn: sqlite3.Connection) -> Dict[str, Optional[Dict[str, Any]]]:
-    """
-    Return last STEP and last RESULT for context.
-    """
     out: Dict[str, Optional[Dict[str, Any]]] = {"last_step": None, "last_result": None}
-
     cur = conn.cursor()
 
     cur.execute(
@@ -170,8 +164,7 @@ def get_last_pipeline_long(conn: sqlite3.Connection) -> Dict[str, Optional[Dict[
     )
     row_step = cur.fetchone()
     if row_step:
-        d = row_to_dict(cur, row_step)
-        out["last_step"] = d
+        out["last_step"] = row_to_dict(cur, row_step)
 
     cur.execute(
         f"""
@@ -184,8 +177,7 @@ def get_last_pipeline_long(conn: sqlite3.Connection) -> Dict[str, Optional[Dict[
     )
     row_res = cur.fetchone()
     if row_res:
-        d = row_to_dict(cur, row_res)
-        out["last_result"] = d
+        out["last_result"] = row_to_dict(cur, row_res)
 
     return out
 
@@ -200,10 +192,7 @@ def get_all_checkpoints(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         """
     )
     rows = cur.fetchall() or []
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        out.append(row_to_dict(cur, r))
-    return out
+    return [row_to_dict(cur, r) for r in rows]
 
 
 def format_all_checkpoints(checkpoints: List[Dict[str, Any]]) -> str:
@@ -217,14 +206,15 @@ def format_all_checkpoints(checkpoints: List[Dict[str, Any]]) -> str:
             f"step_id_from={cp.get('step_id_from')} step_id_to={cp.get('step_id_to')} n_steps={cp.get('n_steps')}"
         )
         parts.append("  SUMMARY:")
-        parts.append("  " + _cap(cp.get("summary"), MAX_ONE_CHECKPOINT_SUMMARY_CHARS).replace("\n", "\n  "))
+        # ✅ no truncation
+        parts.append("  " + str(cp.get("summary") or "").replace("\n", "\n  "))
         if cp.get("state_json"):
             parts.append("  STATE_JSON:")
-            parts.append("  " + _cap(cp.get("state_json"), MAX_ONE_CHECKPOINT_STATE_CHARS).replace("\n", "\n  "))
+            parts.append("  " + str(cp.get("state_json") or "").replace("\n", "\n  "))
         parts.append("")
 
     txt = "\n".join(parts).strip() + "\n"
-    return _cap(txt, MAX_CHECKPOINTS_CONTEXT_CHARS)
+    return txt
 
 
 # -----------------------------
@@ -238,8 +228,7 @@ def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> 
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
         (t,),
     )
-    exists = cur.fetchone()
-    if not exists:
+    if not cur.fetchone():
         return {"_payload_error": f"Missing table for script: {t}"}
 
     cur.execute(f"SELECT * FROM {t} WHERE step_id=?", (int(step_id),))
@@ -249,11 +238,12 @@ def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> 
 
     payload = row_to_dict(cur, row)
 
+    # ✅ no truncation of fields
     for k, v in list(payload.items()):
         if isinstance(v, (bytes, bytearray)):
             payload[k] = f"<{len(v)} bytes>"
         else:
-            payload[k] = _cap(v, MAX_VALUE_CHARS)
+            payload[k] = v
 
     # Resolve payload_store reference if present
     if "content_ref" in payload and payload.get("content_ref"):
@@ -262,7 +252,7 @@ def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> 
         r2 = cur.fetchone()
         if r2:
             r2d = row_to_dict(cur, r2)
-            payload["_resolved_content"] = _cap(r2d.get("text_content") or "", 10_000)
+            payload["_resolved_content"] = r2d.get("text_content") or ""
 
     return payload
 
@@ -325,13 +315,14 @@ def _format_steps_for_inference(steps: List[Dict[str, Any]]) -> str:
             chunks.append(f"SIG: {sig}")
 
         chunks.append("PAYLOAD:")
-        chunks.append(_cap(str(payload), MAX_PAYLOAD_CHARS) or "{}")
+        chunks.append(str(payload) if payload is not None else "{}")
         chunks.append("----")
 
     return "\n".join(chunks)
 
 
 def _summarizer_instructions() -> str:
+    # NOTE: you asked to keep this exactly as-is, so it's unchanged.
     return (
         "You are a STECHEN pipeline summarizer.\n"
         "You will be given:\n"
@@ -374,7 +365,6 @@ def summarize_last_steps_like_current_summarizer(
 
     steps_newest_first: List[Dict[str, Any]] = []
     for r in rows:
-        # r may be Row or tuple
         if isinstance(r, sqlite3.Row):
             step_id = int(r["step_id"])
             script_name = str(r["script_name"])
@@ -405,7 +395,7 @@ def summarize_last_steps_like_current_summarizer(
 
     input_text = (
         "STECHEN_SYSTEM_RULES:\n"
-        f"{_cap(rules_text, MAX_RULES_CHARS)}\n\n"
+        f"{rules_text}\n\n"
         "LAST_STEPS:\n"
         f"{steps_text}\n"
     )
@@ -421,7 +411,7 @@ def summarize_last_steps_like_current_summarizer(
     out = (resp.output_text or "").strip()
     if not out.startswith("2) WHAT HAPPENED"):
         out = "2) WHAT HAPPENED\n" + out
-    return _cap(out, MAX_SUMMARY_CHARS)
+    return out
 
 
 # -----------------------------
@@ -459,7 +449,8 @@ def parse_plan_json(raw: str) -> Dict[str, Any]:
     try:
         obj = json.loads(s)
     except Exception as e:
-        raise ValueError(f"Planner output is not valid JSON: {e}\nRAW:\n{s[:2000]}")
+        # ✅ no truncation of RAW
+        raise ValueError(f"Planner output is not valid JSON: {e}\nRAW:\n{s}")
 
     if not isinstance(obj, dict):
         raise ValueError("Planner JSON must be an object.")
@@ -476,13 +467,9 @@ def parse_plan_json(raw: str) -> Dict[str, Any]:
     return obj
 
 
-# -----------------------------
-# Schema-safe normalization + validation
-# -----------------------------
 def normalize_plan_params(script_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
     p = dict(params or {})
 
-    # common alias mistakes
     if script_name == "DynamicClassCreator":
         if "class_name" not in p and "name" in p:
             p["class_name"] = p.pop("name")
@@ -507,11 +494,6 @@ def normalize_plan_params(script_name: str, params: Dict[str, Any]) -> Dict[str,
 
 
 def get_schema_hint(op: DBOperator, script_names: List[str]) -> str:
-    """
-    Build a compact hint like:
-      - DynamicClassCreator: required[class_name] optional[run_id, step_index?] ...
-    We keep it short but precise for the planner.
-    """
     lines: List[str] = []
     cur = op.conn.cursor()
     for s in script_names:
@@ -542,7 +524,6 @@ def get_schema_hint(op: DBOperator, script_names: List[str]) -> str:
         else:
             lines.append(f"- {t}: optional params {optional}")
 
-    # Add hard-coded examples (helps the model)
     lines.append("")
     lines.append("Examples:")
     lines.append('- DynamicClassCreator → {"class_name": "..."}')
@@ -636,7 +617,6 @@ def main():
             run_id = SEED_FIRST_STEP.get("run_id")
             step_index = SEED_FIRST_STEP.get("step_index")
 
-            # normalize + validate against schema
             params = normalize_plan_params(script_name, params)
             validate_params_against_schema(op, script_name, params)
 
@@ -646,23 +626,6 @@ def main():
                 run_id=run_id,
                 step_index=step_index,
             )
-
-            # checkpoint note for seed
-            seed_summary = _cap(
-                "2) WHAT HAPPENED\n"
-                "- Pipeline was empty; planner seeded the first mandatory library step.\n"
-                f"- Inserted step_id={new_step_id} script={script_name} params={params}\n",
-                15_000,
-            )
-            op.insert_checkpoint(
-                run_id=run_id,
-                step_id_from=new_step_id,
-                step_id_to=new_step_id,
-                n_steps=1,
-                summary=seed_summary,
-                state_json=_cap(json.dumps(SEED_FIRST_STEP, ensure_ascii=False), MAX_PLAN_JSON_CHARS),
-            )
-
         finally:
             try:
                 op.close()
@@ -679,27 +642,24 @@ def main():
     # -----------------------------
     # Normal planner flow (non-empty pipeline)
     # -----------------------------
-    # Checkpoints (ALL, capped)
     all_cps = get_all_checkpoints(conn)
     checkpoints_txt = format_all_checkpoints(all_cps)
 
-    # Executor logs
     logs = get_last_pipeline_long(conn)
 
-    # Fresh summary (2) WHAT HAPPENED
     fresh_summary = summarize_last_steps_like_current_summarizer(
         conn=conn,
         rules_text=rules_text,
-        n_steps=max(1, N_STEPS),
+        n_steps=FRESH_SUMMARY_N,
         model=MODEL,
     )
 
-    # Last N pipeline steps payload evidence
+    # Evidence is last EVIDENCE_N pipeline steps
     cur = conn.cursor()
     cur.execute(
         "SELECT step_id, script_name, created_at, run_id, step_index "
         "FROM pipeline ORDER BY step_id DESC LIMIT ?",
-        (int(max(1, N_STEPS)),),
+        (int(EVIDENCE_N),),
     )
     rows = cur.fetchall() or []
 
@@ -719,29 +679,23 @@ def main():
             }
         )
     steps_chrono = list(reversed(steps_newest_first))
-    evidence_text = _cap(_format_steps_for_inference(steps_chrono), MAX_EVIDENCE_CHARS)
+    evidence_text = _format_steps_for_inference(steps_chrono)
 
-    # Determine step_id range for the planner checkpoint we will write
-    last_step_id_from = steps_chrono[0]["step_id"] if steps_chrono else 0
-
-    # Executor logs text
     last_exec_txt = "EXECUTOR_LOGS: <none>\n"
     if logs["last_step"] or logs["last_result"]:
         parts = ["EXECUTOR_LOGS:"]
         if logs["last_step"]:
             parts.append(f"LAST_STEP: ts={logs['last_step'].get('ts')} status={logs['last_step'].get('status')}")
-            parts.append(f"COMMAND: {_cap(logs['last_step'].get('command'), 8000)}")
-            parts.append(f"MESSAGE: {_cap(logs['last_step'].get('message'), 4000)}")
+            parts.append(f"COMMAND: {logs['last_step'].get('command')}")
+            parts.append(f"MESSAGE: {logs['last_step'].get('message')}")
         if logs["last_result"]:
             parts.append(f"LAST_RESULT: ts={logs['last_result'].get('ts')} status={logs['last_result'].get('status')}")
-            parts.append(f"COMMAND: {_cap(logs['last_result'].get('command'), 8000)}")
-            parts.append(f"MESSAGE: {_cap(logs['last_result'].get('message'), 4000)}")
+            parts.append(f"COMMAND: {logs['last_result'].get('command')}")
+            parts.append(f"MESSAGE: {logs['last_result'].get('message')}")
         last_exec_txt = "\n".join(parts) + "\n"
 
-    # Schema hint from DBOperator
     op_for_schema = DBOperator(str(db_p))
     try:
-        # these are the tools you currently support
         schema_hint = get_schema_hint(
             op_for_schema,
             script_names=[
@@ -763,12 +717,11 @@ def main():
         except Exception:
             pass
 
-    # Planner input
     planner_input = (
         "STECHEN_RULES:\n"
-        f"{_cap(rules_text, MAX_RULES_CHARS)}\n\n"
+        f"{rules_text}\n\n"
         "GOAL:\n"
-        f"{_cap(goal_text, MAX_GOAL_CHARS)}\n\n"
+        f"{goal_text}\n\n"
         f"{checkpoints_txt}\n"
         f"{last_exec_txt}\n"
         "FRESH_SUMMARY:\n"
@@ -777,7 +730,6 @@ def main():
         f"{evidence_text}\n"
     )
 
-    # Call planner
     client = OpenAI()
     resp = client.responses.create(
         model=MODEL,
@@ -793,7 +745,6 @@ def main():
     run_id = plan.get("run_id")
     step_index = plan.get("step_index")
 
-    # Insert next step + checkpoint using DBOperator (schema-safe)
     op = DBOperator(str(db_p))
     try:
         op.ensure_runtime_tables()
@@ -807,24 +758,6 @@ def main():
             run_id=run_id,
             step_index=step_index,
         )
-
-        plan_json_capped = _cap(raw_plan, MAX_PLAN_JSON_CHARS)
-        checkpoint_summary = _cap(
-            f"{fresh_summary}\n\n"
-            f"- Planner inserted next step: step_id={new_step_id} script={script_name} run_id={run_id} step_index={step_index}\n"
-            f"- params: {params}",
-            15_000,
-        )
-
-        op.insert_checkpoint(
-            run_id=run_id,
-            step_id_from=last_step_id_from if last_step_id_from else new_step_id,
-            step_id_to=new_step_id,
-            n_steps=max(1, N_STEPS),
-            summary=checkpoint_summary,
-            state_json=plan_json_capped,
-        )
-
     finally:
         try:
             op.close()
@@ -836,7 +769,7 @@ def main():
             pass
 
     log(f"[OK] Inserted next pipeline step_id={new_step_id} script={script_name}")
-    log("[OK] Wrote pipelineCheckpoints row with summary + plan_json.")
+    log("[OK] Note: planner does NOT write pipelineCheckpoints (handled by checkpoint writer).")
 
 
 if __name__ == "__main__":
