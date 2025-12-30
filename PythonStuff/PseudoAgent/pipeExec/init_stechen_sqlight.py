@@ -9,6 +9,10 @@
 # Usage:
 #   python init_stechen_sqlite.py
 #   python init_stechen_sqlite.py stechen.db
+#
+# NOTE:
+# - RunClass no longer stores classpath.
+# - Classpath is auto-derived from the working directory at runtime.
 
 import sys
 import sqlite3
@@ -107,6 +111,9 @@ CREATE TABLE IF NOT EXISTS ClassFieldCloner (
   FOREIGN KEY(step_id) REFERENCES pipeline(step_id) ON DELETE CASCADE
 );
 
+-- =========================================================
+-- RunClass (NO classpath stored)
+-- =========================================================
 CREATE TABLE IF NOT EXISTS RunClass (
   step_id     INTEGER PRIMARY KEY,
   class_name  TEXT NOT NULL,

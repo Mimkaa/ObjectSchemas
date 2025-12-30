@@ -114,7 +114,7 @@ usage:
 RunClass
 description: executes the main method of a compiled class
 usage:
-    RunClass --class <ClassName>
+    java RunClass --class <ClassName> 
 
 YOU ARE ALLOWED TO USE ONLY THESE SCRIPTS!!!
 

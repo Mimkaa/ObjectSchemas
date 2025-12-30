@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -28,43 +29,54 @@ public class RunClass {
               --cpB64 <base64-utf8-classpath>
 
             Notes:
-              - If --cp/--cpB64 is provided, the child JVM is started with: java -cp <cp> <ClassName> ...
+              - If --cp/--cpB64 is NOT provided, RunClass auto-builds a classpath from the CURRENT DIRECTORY:
+                  Windows: <cwd>;<cwd>\\*
+                  Linux/Mac: <cwd>:<cwd>/*
+                This includes compiled .class files (via <cwd>) and all jars (via <cwd>/*).
               - Exit code of RunClass equals the child JVM exit code.
             """);
     }
 
+    // Build a default classpath that includes:
+    //  - current directory (for .class)
+    //  - wildcard for jars in current directory
+    private static String defaultClasspathFromCwd() {
+        String cwd = new File(".").getAbsoluteFile().getParentFile().getAbsolutePath();
+        String sep = File.pathSeparator; // ';' on Windows, ':' on Unix
+
+        // Wildcard classpath entry to include jars in the directory.
+        // On Windows, Java supports both "dir\\*" and "dir/*".
+        // On Unix, "dir/*" is standard.
+        String wildcard = cwd + File.separator + "*";
+
+        return cwd + sep + wildcard;
+    }
+
     public static void main(String[] args) {
         String className = null;
-        String argsText = null;     // optional extra args for main()
-        String classpath = null;    // optional classpath to forward to child JVM
+        String argsText = null;
+        String classpath = null;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-
-                // -------- class name (plain + B64)
                 case "--class" -> {
                     if (i + 1 < args.length) className = args[++i];
                 }
                 case "--classB64" -> {
                     if (i + 1 < args.length) className = decodeB64Utf8(args[++i]);
                 }
-
-                // -------- optional args passed to child main(String[] args)
                 case "--args" -> {
                     if (i + 1 < args.length) argsText = args[++i];
                 }
                 case "--argsB64" -> {
                     if (i + 1 < args.length) argsText = decodeB64Utf8(args[++i]);
                 }
-
-                // -------- optional classpath forwarded to child JVM
                 case "--cp" -> {
                     if (i + 1 < args.length) classpath = args[++i];
                 }
                 case "--cpB64" -> {
                     if (i + 1 < args.length) classpath = decodeB64Utf8(args[++i]);
                 }
-
                 default -> {
                     // ignore unknown flags
                 }
@@ -77,35 +89,31 @@ public class RunClass {
             return;
         }
 
+        // ✅ If no classpath provided, auto-build it from current directory
+        if (classpath == null || classpath.isBlank()) {
+            classpath = defaultClasspathFromCwd();
+        }
+
         try {
-            // Build child command
             List<String> cmd = new ArrayList<>();
             cmd.add("java");
-
-            if (classpath != null && !classpath.isBlank()) {
-                cmd.add("-cp");
-                cmd.add(classpath);
-            }
-
+            cmd.add("-cp");
+            cmd.add(classpath);
             cmd.add(className);
 
             if (argsText != null && !argsText.isBlank()) {
-                // split on whitespace (simple & deterministic)
                 cmd.addAll(Arrays.asList(argsText.trim().split("\\s+")));
             }
 
-            // Print child command for debugging
             System.out.println("CHILD CMD: " + String.join(" ", cmd));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true); // merge stderr into stdout
+            pb.redirectErrorStream(true);
 
             Process p = pb.start();
 
-            // Stream output live
             try (BufferedReader reader =
                      new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-
                 String line;
                 while ((line = reader.readLine()) != null) {
                     System.out.println(line);
@@ -120,7 +128,6 @@ public class RunClass {
                 System.out.println("❌ Execution failed with code: " + exitCode);
             }
 
-            // CRITICAL: propagate child exit code so pipeline fails properly
             System.exit(exitCode);
 
         } catch (IOException e) {
