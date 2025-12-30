@@ -1,3 +1,4 @@
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -27,9 +28,6 @@ import java.util.Base64;
  *
  * Precedence (per param):
  *   file > B64 > inline
- *
- * Note: For *paths*, file flags still mean "read this file's content".
- *       The B64 variants for file flags decode to the *path string*.
  */
 public class DynamicDelegateCreator {
 
@@ -44,14 +42,10 @@ public class DynamicDelegateCreator {
 
         String outputDir = "."; // default: current directory
 
-        // --------------------------------------------------
-        // Parse args, allowing multi-word field/method declarations
-        // --------------------------------------------------
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
 
             switch (arg) {
-                // -------- parent (plain + B64)
                 case "--parent" -> {
                     if (i + 1 < args.length) parentClass = args[++i];
                 }
@@ -59,7 +53,6 @@ public class DynamicDelegateCreator {
                     if (i + 1 < args.length) parentClass = decodeB64Utf8(args[++i]);
                 }
 
-                // -------- fieldFile (plain + B64 path)
                 case "--fieldFile" -> {
                     if (i + 1 < args.length) fieldFile = args[++i];
                 }
@@ -67,7 +60,6 @@ public class DynamicDelegateCreator {
                     if (i + 1 < args.length) fieldFile = decodeB64Utf8(args[++i]);
                 }
 
-                // -------- methodFile (plain + B64 path)
                 case "--methodFile" -> {
                     if (i + 1 < args.length) methodFile = args[++i];
                 }
@@ -75,7 +67,6 @@ public class DynamicDelegateCreator {
                     if (i + 1 < args.length) methodFile = decodeB64Utf8(args[++i]);
                 }
 
-                // -------- field (inline multi-token) + B64
                 case "--field" -> {
                     StringBuilder sb = new StringBuilder();
                     i++;
@@ -84,14 +75,13 @@ public class DynamicDelegateCreator {
                         sb.append(args[i]);
                         i++;
                     }
-                    i--; // step back so outer loop sees the flag again
+                    i--;
                     fieldDecl = sb.toString().trim();
                 }
                 case "--fieldB64" -> {
                     if (i + 1 < args.length) fieldDecl = decodeB64Utf8(args[++i]);
                 }
 
-                // -------- method (inline multi-token) + B64
                 case "--method" -> {
                     StringBuilder sb = new StringBuilder();
                     i++;
@@ -107,7 +97,6 @@ public class DynamicDelegateCreator {
                     if (i + 1 < args.length) methodDecl = decodeB64Utf8(args[++i]);
                 }
 
-                // -------- outputDir (plain + B64)
                 case "--outputdir", "--outputDir" -> {
                     if (i + 1 < args.length) outputDir = args[++i];
                 }
@@ -124,15 +113,12 @@ public class DynamicDelegateCreator {
         if (parentClass == null || parentClass.isBlank()) {
             System.err.println("ERROR: --parent <ParentClass> (or --parentB64) is required.");
             printUsage();
+            System.exit(2);
             return;
         }
 
         try {
-            // --------------------------------------------------
-            // Precedence: file > inline/B64 snippet
-            //
-            // If fieldFile/methodFile exist, they override fieldDecl/methodDecl
-            // --------------------------------------------------
+            // file overrides inline/b64
             if (fieldFile != null && !fieldFile.isBlank()) {
                 fieldDecl = readAll(Paths.get(fieldFile));
             }
@@ -140,9 +126,23 @@ public class DynamicDelegateCreator {
                 methodDecl = readAll(Paths.get(methodFile));
             }
 
+            // Guard: methodDecl must be a METHOD, not a full class
+            if (methodDecl != null) {
+                String m = methodDecl;
+                if (m.contains("class ") || m.contains("public class") || m.contains("private class")) {
+                    System.err.println("ERROR: method snippet looks like a FULL CLASS definition.");
+                    System.err.println("DynamicDelegateCreator expects ONLY a method declaration, e.g.:");
+                    System.err.println("  public static void main(String[] args) { ... }");
+                    System.exit(3);
+                    return;
+                }
+            }
+
             new DynamicDelegateCreator().writeDelegate(parentClass, fieldDecl, methodDecl, outputDir);
+
         } catch (Exception e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
@@ -151,31 +151,28 @@ public class DynamicDelegateCreator {
             DynamicDelegateCreator — Generate DynamicDelegate.java extending a given parent.
 
             Usage:
-              java DynamicDelegateCreator \\
-                  --parent MyBaseClass \\
-                  [--parentB64 <base64-utf8-parent>] \\
-                  [--field "public int x;"] \\
-                  [--fieldB64 <base64-utf8-field-snippet>] \\
-                  [--method "public void foo() { System.out.println(\\"hi\\"); }"] \\
-                  [--methodB64 <base64-utf8-method-snippet>] \\
-                  [--fieldFile Field.txt] \\
-                  [--fieldFileB64 <base64-utf8-path-to-field-file>] \\
-                  [--methodFile Method.txt] \\
-                  [--methodFileB64 <base64-utf8-path-to-method-file>] \\
-                  [--outputDir .] \\
-                  [--outputDirB64 <base64-utf8-outputdir>]
+              java DynamicDelegateCreator \
+                  --parent MyBaseClass \
+                  [--field "public int x;"] \
+                  [--method "public void foo() { System.out.println(\\"hi\\"); }"] \
+                  [--fieldFile Field.txt] \
+                  [--methodFile Method.txt] \
+                  [--outputDir .]
+
+            Base64 variants (UTF-8):
+              --parentB64 --fieldB64 --methodB64 --fieldFileB64 --methodFileB64 --outputDirB64
 
             Notes:
-              - --field and --method accept multi-word Java snippets; everything up to the next --flag
-                is treated as part of the declaration.
-              - --*B64 variants decode Base64 as UTF-8 and behave like the non-B64 variant.
-              - If --fieldFile/--methodFile are provided (plain or B64), their file contents override inline snippets.
-              - Both --outputDir and --outputdir are accepted (and same for B64).
+              - --field and --method accept multi-word Java snippets; everything up to the next --flag is part of it.
+              - If --fieldFile/--methodFile are provided, their file contents override inline snippets.
+              - Compilation is done with a classpath auto-built from the output directory:
+                  <outDir>;<outDir>\\*   (Windows)  /  <outDir>:<outDir>/*  (Linux/Mac)
+                so it can see the base .class and any jars in that folder.
+              - If javac fails, this tool exits non-zero (no silent reuse of old DynamicDelegate.class).
             """);
     }
 
     private static String readAll(Path p) throws IOException {
-        // Resolve relative paths against the current working directory
         Path abs = p.isAbsolute() ? p : Paths.get(System.getProperty("user.dir")).resolve(p).normalize();
         return Files.readString(abs, StandardCharsets.UTF_8).trim();
     }
@@ -183,6 +180,25 @@ public class DynamicDelegateCreator {
     private static String decodeB64Utf8(String b64) {
         byte[] decoded = Base64.getDecoder().decode(b64);
         return new String(decoded, StandardCharsets.UTF_8).trim();
+    }
+
+    private static String defaultClasspathForDir(Path dir) {
+        String abs = dir.toAbsolutePath().normalize().toString();
+        String sep = File.pathSeparator; // ';' on Windows, ':' on Unix
+        String wildcard = abs + File.separator + "*";
+        return abs + sep + wildcard;
+    }
+
+    private static String indentBlock(String text, String indent) {
+        if (text == null) return null;
+        String t = text.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = t.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            sb.append(indent).append(lines[i]);
+            if (i < lines.length - 1) sb.append("\n");
+        }
+        return sb.toString();
     }
 
     public void writeDelegate(String parentClass,
@@ -205,24 +221,26 @@ public class DynamicDelegateCreator {
 
         if (fieldDecl != null && !fieldDecl.isBlank()) {
             sb.append("    // Cloned / specified field\n");
-            sb.append("    ").append(fieldDecl).append("\n\n");
+            sb.append(indentBlock(fieldDecl, "    ")).append("\n\n");
         }
 
         if (methodDecl != null && !methodDecl.isBlank()) {
             sb.append("    // Cloned / specified method\n");
-            sb.append("    ").append(methodDecl).append("\n\n");
+            sb.append(indentBlock(methodDecl, "    ")).append("\n\n");
         }
 
         sb.append("}\n");
 
-        // Write (overwrite) .java file
         Files.writeString(outFile, sb.toString(), StandardCharsets.UTF_8);
         System.out.println("✅ Wrote delegate source: " + outFile.toAbsolutePath());
 
-        // --- Compile to .class using external javac ---
-        System.out.println("🛠  Compiling DynamicDelegate.java with external javac ...");
+        // Compile WITH classpath (so parent + jars resolve)
+        String cp = defaultClasspathForDir(outDir);
 
-        ProcessBuilder pb = new ProcessBuilder("javac", outFile.getFileName().toString());
+        System.out.println("🛠  Compiling DynamicDelegate.java with external javac ...");
+        System.out.println("    javac -cp \"" + cp + "\" " + outFile.getFileName());
+
+        ProcessBuilder pb = new ProcessBuilder("javac", "-cp", cp, outFile.getFileName().toString());
         pb.directory(outDir.toFile());
         pb.inheritIO();
 
@@ -231,8 +249,10 @@ public class DynamicDelegateCreator {
 
         if (exit != 0) {
             System.err.println("❌ javac failed for DynamicDelegate.java, exit code: " + exit);
-        } else {
-            System.out.println("✅ Compiled DynamicDelegate.class in: " + outDir.toAbsolutePath());
+            System.err.println("❌ NOT continuing (prevents cloning from stale DynamicDelegate.class).");
+            System.exit(exit);
         }
+
+        System.out.println("✅ Compiled DynamicDelegate.class in: " + outDir.toAbsolutePath());
     }
 }

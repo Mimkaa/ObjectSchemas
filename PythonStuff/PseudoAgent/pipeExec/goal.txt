@@ -1,1 +1,1 @@
-make a small program that will be taking images from the web cam every 1 second and convert it to askii and print to cmd
+make a small program that will be taking images from the web cam every 1 second and convert it to askii and print to cmd and add a much error hadling and print statements as possible
