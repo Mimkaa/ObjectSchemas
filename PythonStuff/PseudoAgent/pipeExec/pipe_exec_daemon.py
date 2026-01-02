@@ -9,6 +9,7 @@
 # - Errors are printed immediately to console
 # - Full error output + Python traceback stored in pipelineLong
 # - No silent failures
+# - NEW: RunClass can fail even with exit code 0 if output contains Java exceptions
 #
 
 import os
@@ -19,6 +20,7 @@ import subprocess
 import urllib.request
 import sqlite3
 import traceback
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -86,6 +88,41 @@ def combine_out(res: subprocess.CompletedProcess) -> str:
 def build_classpath() -> str:
     jars = [str(p) for p in WORK_DIR.glob("*.jar")]
     return CLASSPATH_SEP.join([str(WORK_DIR)] + jars)
+
+
+# =========================================================
+# SEMANTIC FAILURE DETECTION (RunClass)
+# =========================================================
+FAIL_PATTERNS = [
+    r"\bException in thread\b",
+    r"\bNoClassDefFoundError\b",
+    r"\bClassNotFoundException\b",
+    r"\bLinkageError\b",
+    r"\bUnsatisfiedLinkError\b",
+    r"\bWebcamException\b",
+    r"\bError: Unable to initialize main class\b",
+]
+
+def looks_like_java_failure(output: str) -> bool:
+    if not output:
+        return False
+
+    strong = [
+        "Exception in thread",
+        "NoClassDefFoundError",
+        "ClassNotFoundException",
+        "UnsatisfiedLinkError",
+        "LinkageError",
+        "Error: Unable to initialize main class",
+    ]
+    if any(s in output for s in strong):
+        return True
+
+    for pat in FAIL_PATTERNS:
+        if re.search(pat, output):
+            return True
+
+    return False
 
 
 # =========================================================
@@ -177,10 +214,20 @@ def run_java(script_name: str, argv: List[str]) -> str:
 
     combined = combine_out(res)
 
+    # 1) Hard failure if JVM returned non-zero
     if res.returncode != 0:
         log("❌ [JAVA FAILED]")
         log(combined)
         raise RuntimeError(f"[JAVA] exited with {res.returncode}\n{combined}")
+
+    # 2) Semantic failure for RunClass: child printed exceptions but exited 0
+    if script_name == "RunClass" and looks_like_java_failure(combined):
+        log("❌ [JAVA SEMANTIC FAIL] RunClass output indicates failure (exit code was 0)")
+        log(combined)
+        raise RuntimeError(
+            "[JAVA] RunClass child program printed exception/error but exited with 0.\n"
+            "Treating as FAIL so planner can react.\n\n" + combined
+        )
 
     return combined
 

@@ -23,7 +23,7 @@ from typing import Optional, Tuple, List
 
 # Import your class-based summarizer (from the previous refactor)
 # File name should match where you saved it.
-from stechen_gpt_summarizer import StechenGPTSummarizer
+from stechen_gpt_summarize import StechenGPTSummarizer
 
 
 DEFAULT_DB = "stechen.db"

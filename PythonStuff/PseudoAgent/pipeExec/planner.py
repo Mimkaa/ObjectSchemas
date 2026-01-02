@@ -1,39 +1,21 @@
-# planner.py
+# planner.py (FIXED)
 #
-# STECHEN Planner (DB-driven, schema-safe) — NO CHECKPOINT WRITES
+# Fixes:
+# 1) Keep RAW script_name for executor; only sanitize for table lookups.
+# 2) NEVER include CreateTextFileFromBase64 in schema hint list.
+# 3) Hard-enforce: CreateTextFile MUST include content_text OR content_ref (no empty files).
 #
-# ✅ Behavior:
-# 1) If pipeline is empty → seed FIRST mandatory step:
-#       DynamicJarLoader { "library": "net.bytebuddy:byte-buddy:1.15.3" }
-#    (and EXIT)  — no OpenAI call, no checkpoints written
-# 2) If pipeline not empty → build the SAME planner input as before:
-#       RULES + GOAL + ALL EXISTING CHECKPOINTS (as context) + last executor logs
-#       + fresh summarizer output + last N evidence
-#    Then ask GPT for EXACTLY ONE next step JSON and insert it into the DB.
-#
-# ❌ Removed:
-# - Any writes to pipelineCheckpoints (planner never inserts checkpoints)
-#
-# Usage:
-#   python planner.py
-#
-# Env:
-#   OPENAI_API_KEY (required unless DB empty and seeding first step)
-#   STECHEN_DB_PATH, STECHEN_RULES_FILE, STECHEN_GOAL_FILE
-#   STECHEN_N_STEPS (default 5)   [kept, but summary/evidence overridden below]
-#   STECHEN_MODEL (default "gpt-5.2")
-#   STECHEN_RUN_ID (optional fallback)
+# Drop-in replacement: you can paste this over your current planner.py.
 #
 import os
 import json
-import time
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 from db_operator import DBOperator
-
+from stechen_gpt_summarize import StechenGPTSummarizer
 
 # -----------------------------
 # CONFIG
@@ -49,25 +31,10 @@ DEFAULT_RUN_ID = os.getenv("STECHEN_RUN_ID", None)
 PIPELINE_LONG_TABLE = "pipelineLong"
 CHECKPOINTS_TABLE = "pipelineCheckpoints"
 
-# caps removed logically by making _cap a no-op
-MAX_RULES_CHARS = 80_000
-MAX_GOAL_CHARS = 20_000
-MAX_EVIDENCE_CHARS = 25_000
-MAX_SUMMARY_CHARS = 15_000
-MAX_PLAN_JSON_CHARS = 15_000
-
-MAX_CHECKPOINTS_CONTEXT_CHARS = 60_000
-MAX_ONE_CHECKPOINT_SUMMARY_CHARS = 6_000
-MAX_ONE_CHECKPOINT_STATE_CHARS = 2_000
-
-MAX_PAYLOAD_CHARS = 10_000
-MAX_VALUE_CHARS = 4_000
-
 # Force these per your request:
-FRESH_SUMMARY_N = 50     # <-- fresh summary is always last 50
-EVIDENCE_N = 5           # <-- evidence is last 5 steps
+FRESH_SUMMARY_N = 50
+EVIDENCE_N = 5
 
-# Seed behavior: if pipeline empty, we insert this as the first step
 SEED_FIRST_STEP = {
     "script_name": "DynamicJarLoader",
     "params": {"library": "net.bytebuddy:byte-buddy:1.15.3"},
@@ -79,13 +46,6 @@ SEED_FIRST_STEP = {
 # -----------------------------
 # small utils
 # -----------------------------
-def _cap(s: Optional[str], n: int) -> str:
-    # ✅ TRUNCATION REMOVED: always return full text
-    if s is None:
-        return ""
-    return str(s)
-
-
 def _read_text(path: Path) -> str:
     if not path.exists():
         return ""
@@ -98,10 +58,6 @@ def _safe_table_name(name: str) -> str:
         if ch.isalnum() or ch == "_":
             out.append(ch)
     return "".join(out)
-
-
-def _ts() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def log(*args) -> None:
@@ -182,6 +138,20 @@ def get_last_pipeline_long(conn: sqlite3.Connection) -> Dict[str, Optional[Dict[
     return out
 
 
+def get_last_fail_result(conn: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+    cur = conn.cursor()
+    row = cur.execute(
+        f"""
+        SELECT id, ts, event_type, status, command, message
+        FROM {PIPELINE_LONG_TABLE}
+        WHERE event_type='RESULT' AND status='FAIL'
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    return row_to_dict(cur, row) if row else None
+
+
 def get_all_checkpoints(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     cur = conn.cursor()
     cur.execute(
@@ -206,28 +176,23 @@ def format_all_checkpoints(checkpoints: List[Dict[str, Any]]) -> str:
             f"step_id_from={cp.get('step_id_from')} step_id_to={cp.get('step_id_to')} n_steps={cp.get('n_steps')}"
         )
         parts.append("  SUMMARY:")
-        # ✅ no truncation
         parts.append("  " + str(cp.get("summary") or "").replace("\n", "\n  "))
         if cp.get("state_json"):
             parts.append("  STATE_JSON:")
             parts.append("  " + str(cp.get("state_json") or "").replace("\n", "\n  "))
         parts.append("")
 
-    txt = "\n".join(parts).strip() + "\n"
-    return txt
+    return ("\n".join(parts).strip() + "\n")
 
 
 # -----------------------------
-# Summarizer (same style as stechen_gpt_summarize.py)
+# Evidence formatting (last N)
 # -----------------------------
 def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> Dict[str, Any]:
     cur = conn.cursor()
     t = _safe_table_name(script_name)
 
-    cur.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (t,),
-    )
+    cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,))
     if not cur.fetchone():
         return {"_payload_error": f"Missing table for script: {t}"}
 
@@ -238,13 +203,6 @@ def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> 
 
     payload = row_to_dict(cur, row)
 
-    # ✅ no truncation of fields
-    for k, v in list(payload.items()):
-        if isinstance(v, (bytes, bytearray)):
-            payload[k] = f"<{len(v)} bytes>"
-        else:
-            payload[k] = v
-
     # Resolve payload_store reference if present
     if "content_ref" in payload and payload.get("content_ref"):
         ref = payload["content_ref"]
@@ -253,6 +211,11 @@ def _fetch_payload(conn: sqlite3.Connection, script_name: str, step_id: int) -> 
         if r2:
             r2d = row_to_dict(cur, r2)
             payload["_resolved_content"] = r2d.get("text_content") or ""
+
+    # Make bytes printable
+    for k, v in list(payload.items()):
+        if isinstance(v, (bytes, bytearray)):
+            payload[k] = f"<{len(v)} bytes>"
 
     return payload
 
@@ -272,146 +235,11 @@ def _format_steps_for_inference(steps: List[Dict[str, Any]]) -> str:
             + (f"  RUN_ID={run_id}" if run_id else "")
             + (f"  STEP_INDEX={step_index}" if step_index is not None else "")
         )
-
-        sig = ""
-        try:
-            if script == "DynamicJarLoader":
-                sig = f"--library {payload.get('library','')}"
-            elif script == "DynamicClassCreator":
-                sig = f"--name {payload.get('class_name','')}"
-            elif script == "CreateDirectory":
-                sig = f"--name {payload.get('directory_name','')} --path {payload.get('target_path','')}"
-            elif script == "CurrentDirUpdate":
-                sig = f"--dirname {payload.get('dirname','')}"
-            elif script == "CreateTextFile":
-                sig = f"--name {payload.get('file_name','')} (content_ref={payload.get('content_ref')})"
-            elif script == "CreateTextFileFromBase64":
-                sig = f"--name {payload.get('file_name','')} (content_b64_len={len(payload.get('content_b64') or '')})"
-            elif script == "DynamicDelegateCreator":
-                sig = (
-                    f"--parent {payload.get('parent','')} "
-                    f"--methodFile {payload.get('method_file','')} "
-                    f"--fieldFile {payload.get('field_file','')} "
-                    f"--outputDir {payload.get('output_dir','')}"
-                )
-            elif script == "ClassMethodCloner":
-                sig = (
-                    f"--classNameToModify {payload.get('class_name_to_modify','')} "
-                    f"--delegateclass {payload.get('delegate_class','')} "
-                    f"--method {payload.get('method_name','')}"
-                )
-            elif script == "ClassFieldCloner":
-                sig = (
-                    f"--classNameToModify {payload.get('class_name_to_modify','')} "
-                    f"--delegateclass {payload.get('delegate_class','')} "
-                    f"--field {payload.get('field_name','')}"
-                )
-            elif script == "RunClass":
-                sig = f"--class {payload.get('class_name','')} --args {payload.get('args_text','')}"
-        except Exception:
-            sig = ""
-
-        if sig:
-            chunks.append(f"SIG: {sig}")
-
         chunks.append("PAYLOAD:")
         chunks.append(str(payload) if payload is not None else "{}")
         chunks.append("----")
 
     return "\n".join(chunks)
-
-
-def _summarizer_instructions() -> str:
-    # NOTE: you asked to keep this exactly as-is, so it's unchanged.
-    return (
-        "You are a STECHEN pipeline summarizer.\n"
-        "You will be given:\n"
-        "(A) STECHEN_SYSTEM_RULES (authoritative)\n"
-        "(B) LAST_STEPS (the last N recorded steps)\n\n"
-        "Your job is to infer what is happening RIGHT NOW.\n"
-        "Important: This system is rule-driven. Use the rules to interpret intent.\n\n"
-        "Inference rules you MUST apply:\n"
-        "- Recognize STANDARD METHOD CONSTRUCTION: CreateTextFile -> DynamicDelegateCreator -> ClassMethodCloner.\n"
-        "  If you see that pattern, assume we are 'adding method <methodName>' to the base class.\n"
-        "- Recognize STANDARD FIELD CONSTRUCTION: (delegate creation + ClassFieldCloner).\n"
-        "- If RunClass appears, assume we are executing the accumulated base class now.\n"
-        "- If method/field source is missing (content stored by reference), still infer purpose from filenames and method_name.\n"
-        "- You MAY reasonably assume earlier prerequisite steps were done if the current steps depend on them.\n"
-        "  Only say 'unknown' if it changes what the next action should be.\n\n"
-        "Output rules (HARD):\n"
-        "- Output ONLY one heading: exactly '2) WHAT HAPPENED'\n"
-        "- Then bullet points.\n"
-        "- No other headings, no extra commentary.\n"
-        "- Prefer confident, rule-backed interpretation over 'unknown'.\n"
-    )
-
-
-def summarize_last_steps_like_current_summarizer(
-    conn: sqlite3.Connection,
-    rules_text: str,
-    n_steps: int,
-    model: str,
-) -> str:
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT step_id, script_name, created_at, run_id, step_index "
-        "FROM pipeline ORDER BY step_id DESC LIMIT ?",
-        (int(n_steps),),
-    )
-    rows = cur.fetchall() or []
-
-    if not rows:
-        return "2) WHAT HAPPENED\n- No pipeline steps found."
-
-    steps_newest_first: List[Dict[str, Any]] = []
-    for r in rows:
-        if isinstance(r, sqlite3.Row):
-            step_id = int(r["step_id"])
-            script_name = str(r["script_name"])
-            created_at = r["created_at"]
-            run_id = r["run_id"]
-            step_index = r["step_index"]
-        else:
-            step_id = int(r[0])
-            script_name = str(r[1])
-            created_at = r[2]
-            run_id = r[3]
-            step_index = r[4]
-
-        payload = _fetch_payload(conn, script_name, step_id)
-        steps_newest_first.append(
-            {
-                "step_id": step_id,
-                "script_name": script_name,
-                "created_at": created_at,
-                "run_id": run_id,
-                "step_index": step_index,
-                "payload": payload,
-            }
-        )
-
-    steps_chrono = list(reversed(steps_newest_first))
-    steps_text = _format_steps_for_inference(steps_chrono)
-
-    input_text = (
-        "STECHEN_SYSTEM_RULES:\n"
-        f"{rules_text}\n\n"
-        "LAST_STEPS:\n"
-        f"{steps_text}\n"
-    )
-
-    client = OpenAI()
-    resp = client.responses.create(
-        model=model,
-        instructions=_summarizer_instructions(),
-        input=input_text,
-        reasoning={"effort": "low"},
-    )
-
-    out = (resp.output_text or "").strip()
-    if not out.startswith("2) WHAT HAPPENED"):
-        out = "2) WHAT HAPPENED\n" + out
-    return out
 
 
 # -----------------------------
@@ -420,7 +248,7 @@ def summarize_last_steps_like_current_summarizer(
 def planner_instructions(schema_hint: str) -> str:
     return (
         "You are the STECHEN planner.\n"
-        "You will be given RULES, GOAL, checkpoints, last executor log, a fresh pipeline summary, and step evidence.\n"
+        "You will be given RULES, GOAL, checkpoints, last executor log, last FAIL traceback, a fresh pipeline summary, and step evidence.\n"
         "You must output EXACTLY ONE next pipeline DB step to insert.\n\n"
         "HARD OUTPUT RULE:\n"
         "- Output ONLY a single JSON object. No markdown. No extra text.\n\n"
@@ -437,7 +265,8 @@ def planner_instructions(schema_hint: str) -> str:
         "Constraints:\n"
         "- Choose the smallest safe next step that follows the rules.\n"
         "- Do NOT invent past actions; base decisions on evidence.\n"
-        "- If next step is CreateTextFile with huge content, prefer content_ref convention (payload_store).\n"
+        "- NEVER output CreateTextFileFromBase64 (FORBIDDEN).\n"
+        "- If script_name is CreateTextFile, you MUST provide content_text OR content_ref (NO empty files).\n"
     )
 
 
@@ -449,7 +278,6 @@ def parse_plan_json(raw: str) -> Dict[str, Any]:
     try:
         obj = json.loads(s)
     except Exception as e:
-        # ✅ no truncation of RAW
         raise ValueError(f"Planner output is not valid JSON: {e}\nRAW:\n{s}")
 
     if not isinstance(obj, dict):
@@ -467,28 +295,27 @@ def parse_plan_json(raw: str) -> Dict[str, Any]:
     return obj
 
 
-def normalize_plan_params(script_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_plan_params(raw_script_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize common alias keys -> canonical DB column keys.
+    IMPORTANT: raw_script_name must be the real script name, not sanitized.
+    """
     p = dict(params or {})
 
-    if script_name == "DynamicClassCreator":
-        if "class_name" not in p and "name" in p:
-            p["class_name"] = p.pop("name")
+    if raw_script_name == "DynamicClassCreator" and "class_name" not in p and "name" in p:
+        p["class_name"] = p.pop("name")
 
-    if script_name == "DynamicJarLoader":
-        if "library" not in p and "lib" in p:
-            p["library"] = p.pop("lib")
+    if raw_script_name == "DynamicJarLoader" and "library" not in p and "lib" in p:
+        p["library"] = p.pop("lib")
 
-    if script_name == "CurrentDirUpdate":
-        if "dirname" not in p and "dir" in p:
-            p["dirname"] = p.pop("dir")
+    if raw_script_name == "CurrentDirUpdate" and "dirname" not in p and "dir" in p:
+        p["dirname"] = p.pop("dir")
 
-    if script_name == "CreateDirectory":
-        if "directory_name" not in p and "name" in p:
-            p["directory_name"] = p.pop("name")
+    if raw_script_name == "CreateDirectory" and "directory_name" not in p and "name" in p:
+        p["directory_name"] = p.pop("name")
 
-    if script_name == "RunClass":
-        if "class_name" not in p and "class" in p:
-            p["class_name"] = p.pop("class")
+    if raw_script_name == "RunClass" and "class_name" not in p and "class" in p:
+        p["class_name"] = p.pop("class")
 
     return p
 
@@ -531,9 +358,9 @@ def get_schema_hint(op: DBOperator, script_names: List[str]) -> str:
     return "\n".join(lines).strip()
 
 
-def validate_params_against_schema(op: DBOperator, script_name: str, params: Dict[str, Any]) -> None:
+def validate_params_against_schema(op: DBOperator, raw_script_name: str, params: Dict[str, Any]) -> None:
     cur = op.conn.cursor()
-    t = _safe_table_name(script_name)
+    t = _safe_table_name(raw_script_name)
 
     cur.execute(f"PRAGMA table_info({t})")
     cols = cur.fetchall() or []
@@ -561,6 +388,22 @@ def validate_params_against_schema(op: DBOperator, script_name: str, params: Dic
         raise ValueError(
             f"Planner produced invalid params for '{t}'. Missing required columns: {missing}. "
             f"Got keys: {list(params.keys())}"
+        )
+
+
+def enforce_no_empty_create_text_file(raw_script_name: str, params: Dict[str, Any]) -> None:
+    """
+    Prevents the exact failure you saw: empty CreateTextFile -> delegate missing method -> cloner fails.
+    Your CreateTextFile payload schema uses (likely) content_text or content_ref.
+    """
+    if raw_script_name != "CreateTextFile":
+        return
+    content_text = (params.get("content_text") or "").strip()
+    content_ref = params.get("content_ref")
+    if not content_text and not content_ref:
+        raise ValueError(
+            "INVALID PLAN: CreateTextFile MUST include content_text or content_ref. "
+            "Refusing to insert empty file step."
         )
 
 
@@ -612,16 +455,17 @@ def main():
         op = DBOperator(str(db_p))
         try:
             op.ensure_runtime_tables()
-            script_name = SEED_FIRST_STEP["script_name"]
+            raw_script = SEED_FIRST_STEP["script_name"]
             params = SEED_FIRST_STEP["params"]
             run_id = SEED_FIRST_STEP.get("run_id")
             step_index = SEED_FIRST_STEP.get("step_index")
 
-            params = normalize_plan_params(script_name, params)
-            validate_params_against_schema(op, script_name, params)
+            params = normalize_plan_params(raw_script, params)
+            enforce_no_empty_create_text_file(raw_script, params)
+            validate_params_against_schema(op, raw_script, params)
 
             new_step_id = op.insert_step(
-                script_name=script_name,
+                script_name=raw_script,
                 params=params,
                 run_id=run_id,
                 step_index=step_index,
@@ -636,7 +480,7 @@ def main():
             except Exception:
                 pass
 
-        log(f"[OK] Seeded step_id={new_step_id} ({script_name})")
+        log(f"[OK] Seeded step_id={new_step_id} ({raw_script})")
         return
 
     # -----------------------------
@@ -646,13 +490,15 @@ def main():
     checkpoints_txt = format_all_checkpoints(all_cps)
 
     logs = get_last_pipeline_long(conn)
+    last_fail = get_last_fail_result(conn)
 
-    fresh_summary = summarize_last_steps_like_current_summarizer(
-        conn=conn,
-        rules_text=rules_text,
-        n_steps=FRESH_SUMMARY_N,
+    summarizer = StechenGPTSummarizer(
+        db_path=str(db_p),
+        rules_file=str(rules_p),
         model=MODEL,
+        base_dir=base_dir,
     )
+    fresh_summary = summarizer.summarize(n=FRESH_SUMMARY_N, run_id=DEFAULT_RUN_ID or None)
 
     # Evidence is last EVIDENCE_N pipeline steps
     cur = conn.cursor()
@@ -681,19 +527,38 @@ def main():
     steps_chrono = list(reversed(steps_newest_first))
     evidence_text = _format_steps_for_inference(steps_chrono)
 
-    last_exec_txt = "EXECUTOR_LOGS: <none>\n"
-    if logs["last_step"] or logs["last_result"]:
-        parts = ["EXECUTOR_LOGS:"]
-        if logs["last_step"]:
-            parts.append(f"LAST_STEP: ts={logs['last_step'].get('ts')} status={logs['last_step'].get('status')}")
-            parts.append(f"COMMAND: {logs['last_step'].get('command')}")
-            parts.append(f"MESSAGE: {logs['last_step'].get('message')}")
-        if logs["last_result"]:
-            parts.append(f"LAST_RESULT: ts={logs['last_result'].get('ts')} status={logs['last_result'].get('status')}")
-            parts.append(f"COMMAND: {logs['last_result'].get('command')}")
-            parts.append(f"MESSAGE: {logs['last_result'].get('message')}")
-        last_exec_txt = "\n".join(parts) + "\n"
+    # last step/result (existing behavior)
+    last_exec_parts = ["EXECUTOR_LOGS:"]
+    if logs.get("last_step"):
+        last_exec_parts.append(
+            f"LAST_STEP: ts={logs['last_step'].get('ts')} status={logs['last_step'].get('status')}"
+        )
+        last_exec_parts.append(f"COMMAND: {logs['last_step'].get('command')}")
+        last_exec_parts.append("MESSAGE:")
+        last_exec_parts.append(str(logs["last_step"].get("message") or ""))
 
+    if logs.get("last_result"):
+        last_exec_parts.append(
+            f"LAST_RESULT: ts={logs['last_result'].get('ts')} status={logs['last_result'].get('status')}"
+        )
+        last_exec_parts.append(f"COMMAND: {logs['last_result'].get('command')}")
+        last_exec_parts.append("MESSAGE:")
+        last_exec_parts.append(str(logs["last_result"].get("message") or ""))
+
+    last_exec_txt = "\n".join(last_exec_parts).strip() + "\n"
+
+    if last_fail:
+        last_fail_txt = (
+            "LAST_FAIL_RESULT (FULL TRACEBACK):\n"
+            f"ts={last_fail.get('ts')} id={last_fail.get('id')}\n"
+            f"COMMAND: {last_fail.get('command')}\n"
+            "MESSAGE:\n"
+            f"{str(last_fail.get('message') or '')}\n"
+        )
+    else:
+        last_fail_txt = "LAST_FAIL_RESULT (FULL TRACEBACK): <none>\n"
+
+    # ✅ IMPORTANT: do NOT include CreateTextFileFromBase64 here.
     op_for_schema = DBOperator(str(db_p))
     try:
         schema_hint = get_schema_hint(
@@ -704,7 +569,6 @@ def main():
                 "CreateDirectory",
                 "CurrentDirUpdate",
                 "CreateTextFile",
-                "CreateTextFileFromBase64",
                 "DynamicDelegateCreator",
                 "ClassMethodCloner",
                 "ClassFieldCloner",
@@ -724,7 +588,8 @@ def main():
         f"{goal_text}\n\n"
         f"{checkpoints_txt}\n"
         f"{last_exec_txt}\n"
-        "FRESH_SUMMARY:\n"
+        f"{last_fail_txt}\n"
+        "FRESH_SUMMARY (via StechenGPTSummarizer):\n"
         f"{fresh_summary}\n\n"
         "LAST_PIPELINE_STEPS_EVIDENCE:\n"
         f"{evidence_text}\n"
@@ -740,20 +605,25 @@ def main():
     raw_plan = (resp.output_text or "").strip()
     plan = parse_plan_json(raw_plan)
 
-    script_name = _safe_table_name(str(plan["script_name"]))
+    raw_script = str(plan["script_name"]).strip()
     params = plan["params"] or {}
     run_id = plan.get("run_id")
     step_index = plan.get("step_index")
+
+    # Hard block forbidden tool even if GPT emits it.
+    if raw_script == "CreateTextFileFromBase64":
+        raise ValueError("FORBIDDEN: planner attempted to emit CreateTextFileFromBase64.")
 
     op = DBOperator(str(db_p))
     try:
         op.ensure_runtime_tables()
 
-        params = normalize_plan_params(script_name, params)
-        validate_params_against_schema(op, script_name, params)
+        params = normalize_plan_params(raw_script, params)
+        enforce_no_empty_create_text_file(raw_script, params)
+        validate_params_against_schema(op, raw_script, params)
 
         new_step_id = op.insert_step(
-            script_name=script_name,
+            script_name=raw_script,   # ✅ store REAL script name
             params=params,
             run_id=run_id,
             step_index=step_index,
@@ -768,7 +638,7 @@ def main():
         except Exception:
             pass
 
-    log(f"[OK] Inserted next pipeline step_id={new_step_id} script={script_name}")
+    log(f"[OK] Inserted next pipeline step_id={new_step_id} script={raw_script}")
     log("[OK] Note: planner does NOT write pipelineCheckpoints (handled by checkpoint writer).")
 
 

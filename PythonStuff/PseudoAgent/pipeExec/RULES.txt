@@ -13,7 +13,8 @@ CORE IDEA
 ---------
 A STECHEN pipeline executes a task by constructing small Java classes
 step-by-step in the current working directory and then executing them.
-Each pipeline step constructs a minimal Java class whose execution performs a single, concrete action.
+
+Each pipeline step performs ONE concrete mechanical action.
 
 The fundamental construction pattern is:
 
@@ -56,42 +57,56 @@ construction or cloning may occur:
 
 
 Rule 1 — No DynamicClassCreator, ClassMethodCloner, or ClassFieldCloner
-may be executed before all mandatory libraries are loaded.
+may be executed before ALL mandatory libraries are loaded.
 
 
 AVAILABLE SCRIPTS
 -----------------
 
 CreateDirectory
-description: creates a directory with the given name
+description:
+    Creates a directory with the given name.
 usage:
     CreateDirectory --name <DirectoryName>
 
 
 DynamicJarLoader
-description: downloads and loads a Maven library into the environment
+description:
+    Downloads and loads a Maven library into the environment.
 usage:
     DynamicJarLoader --library <groupId:artifactId:version>
 
+
 DynamicClassCreator
-description: creates a base Java class (stub) with the given name
+description:
+    Creates a base Java class (stub) with the given name.
 usage:
     DynamicClassCreator --name <ClassName>
 
+
 CreateTextFile
-description: creates a text file used as source for delegate generation
+description:
+    Creates or overwrites a text file used as source for delegate generation.
 usage:
     CreateTextFile --name <FileName>
-    CreateTextFile --name <FileName> --contentB64 <Base64EncodedContent>
+    CreateTextFile --name <FileName> --contentB64 <payload>
+notes:
+    - <payload> may be pre-encoded base64 OR raw text if Rule 9.1 is supported.
+
 
 DynamicDelegateCreator
 description:
     Generates a delegate Java class from a text file.
     The delegate class EXTENDS the base class.
-usage:
+usage (method delegate):
     DynamicDelegateCreator --parent <BaseClass>
                            --methodFile <FileName>.txt
                            --outputDir .
+usage (field delegate):
+    DynamicDelegateCreator --parent <BaseClass>
+                           --fieldFile <FileName>.txt
+                           --outputDir .
+
 
 ClassMethodCloner
 description:
@@ -102,6 +117,7 @@ usage:
                       --delegateclass <DelegateClass>
                       --method <MethodName>
 
+
 ClassFieldCloner
 description:
     Clones exactly ONE field from a delegate class
@@ -111,12 +127,47 @@ usage:
                      --delegateclass <DelegateClass>
                      --field <FieldName>
 
-RunClass
-description: executes the main method of a compiled class
-usage:
-    java RunClass --class <ClassName> 
 
-YOU ARE ALLOWED TO USE ONLY THESE SCRIPTS!!!
+RunClass
+description:
+    Executes the main method of a compiled class.
+usage:
+    RunClass --class <ClassName>
+
+
+YOU ARE ALLOWED TO USE ONLY THESE SCRIPTS.
+
+
+FORBIDDEN SCRIPT
+----------------
+
+CreateTextFileFromBase64
+
+STATUS: ❌ FORBIDDEN — MUST NOT BE USED
+
+Rationale:
+CreateTextFileFromBase64 bypasses critical pipeline invariants and has been
+observed to:
+
+- overwrite valid source files unintentionally
+- erase method bodies after successful creation
+- desynchronize planner intent from executor state
+- cause repeated delegate generation with empty or invalid sources
+- lead to non-terminating semantic failure loops
+
+Rule F1 — CreateTextFileFromBase64 is NOT PART of the STECHEN pipeline.
+It MUST NOT be emitted by the planner.
+It MUST NOT be executed by the executor.
+
+Rule F2 — Any pipeline step containing CreateTextFileFromBase64
+is INVALID and MUST be rejected or ignored.
+
+Rule F3 — All delegate source files MUST be created using:
+    CreateTextFile --name <FileName> --contentB64 <payload>
+
+Rule F4 — There is exactly ONE allowed source-file creation mechanism.
+No alternatives are permitted.
+
 
 GLOBAL PIPE RULES
 -----------------
@@ -127,15 +178,28 @@ Rule 3 — Commands must be separated by EXACTLY two blank lines.
 Rule 4 — All source files, class files, jars, and text files live in
 the current working directory.
 
-Rule 5 — Delegates are intermediate artifacts only.
+Rule 5 — Delegate classes are intermediate artifacts only.
 The base class is the final accumulated result.
 
-Rule 6 — Exactly ONE field or ONE method may be cloned per pipeline step.
+Rule 6 — Exactly ONE field OR ONE method may be cloned per pipeline step.
 No batching is allowed.
+
+Rule 6.1 — METHOD CLONING OVERRIDES EXISTING METHODS.
+If the base class already contains a method with the same
+name + descriptor (same signature),
+ClassMethodCloner REPLACES the existing method entirely.
+
+Implications:
+- Re-cloning the same method name is the supported way to update behavior.
+- The last successful clone of a given method signature is authoritative.
 
 Rule 7 — Dependency order is strict:
 - Fields must exist before methods that reference them.
 - Methods must exist before other methods that call them.
+
+Rule 7.1 — Delegate source filenames MUST include `.txt`.
+DynamicDelegateCreator expects a real file path.
+Do NOT omit the `.txt` extension.
 
 Rule 8 — Delegate classes are transient.
 Only the base class persists as the final executable artifact.
@@ -143,25 +207,42 @@ Only the base class persists as the final executable artifact.
 
 FIELD CLONING CLARIFICATION (IMPORTANT)
 ---------------------------------------
-Rule 8.1 — ClassFieldCloner clones only the FIELD DEFINITION (name + type).
-It does NOT reliably clone initialization values / initializer bytecode.
+Rule 8.1 — ClassFieldCloner clones ONLY the FIELD DEFINITION
+(name + type descriptor).
+
+It does NOT reliably clone:
+- initialization values
+- initializer bytecode
+- constructor logic
 
 Therefore:
-- Treat field cloning as "declaring storage".
-- Do all initialization through a method that runs at runtime
-  (constructor, init() method, or inside main()).
+- Treat field cloning as declaring storage only.
+- Perform ALL initialization via runtime methods
+  (constructor, init() method, or main()).
+
+Rule 8.2 — FIELD CLONING DOES NOT OVERWRITE.
+If the base class already contains a field with the same
+name + type descriptor, the field is NOT replaced.
+
+Implications:
+- Fields are declared once.
+- Changing field semantics requires a NEW field name.
 
 
 STANDARD METHOD CONSTRUCTION PIPELINE
 -------------------------------------
 Goal: Add ONE method to a base class <BaseClass>.
 
-1) Create base class (if not already present):
+1) Ensure base class exists:
        DynamicClassCreator --name <BaseClass>
 
 2) Write method source into a text file:
        CreateTextFile --name <MethodFile>
                       --contentB64 <method source>
+
+Rule 6.2 — Method source is REQUIRED.
+The method file MUST contain a complete method definition.
+Empty or invalid files cause cloning to fail.
 
 3) Generate delegate class:
        DynamicDelegateCreator --parent <BaseClass>
@@ -186,56 +267,28 @@ Goal: Add ONE field to a base class <BaseClass>.
 1) Ensure base class exists:
        DynamicClassCreator --name <BaseClass>
 
-2) Generate delegate containing the field.
+2) Write field source into a text file:
+       CreateTextFile --name <FieldFile>
+                      --contentB64 <field source>
 
-3) Clone field into base class:
+3) Generate delegate containing the field:
+       DynamicDelegateCreator --parent <BaseClass>
+                              --fieldFile <FieldFile>.txt
+                              --outputDir .
+
+4) Clone field into base class:
        ClassFieldCloner --classNameToModify <BaseClass>
                         --delegateclass DynamicDelegate
                         --field <FieldName>
 
-4) Initialize the field via a method (NOT via field initializer).
+5) Initialize the field via a METHOD (never via initializer).
 
 
-BASE64 CONTENT RULE
--------------------
-Rule 9 — Any method or field source containing quotes, special characters,
-or multiline logic MUST be passed using --contentB64.
-
-This guarantees correct parsing and exact reproduction of the source.
 
 
-RAW-TAIL BASE64 HANDLING (EXECUTOR BEHAVIOR)
--------------------------------------------
-Rule 9.1 — When a command contains a flag ending with `B64`
-(e.g. `--contentB64`), the STECHEN executor MAY accept raw source text
-directly following the flag.
 
-- The user writes normal Java source code (plain text).
-- The executor automatically:
-  1) captures all text following the `--contentB64` flag,
-  2) base64-encodes it internally,
-  3) decodes it before passing it to the target script.
-
-Manual base64 encoding by the user is NOT required.
-
-This behavior is equivalent to providing a pre-encoded base64 payload and
-exists solely to ensure safe transport of multiline source code through
-the pipeline.
-
-
-EXAMPLE PIPE — NUMBER GUESSING GAME (PIPELINE COMPONENTS)
-========================================================
-
-This is a concrete STECHEN-style pipeline that constructs a GuessGame class
-by cloning ONE field and THREE methods from delegates, then runs it.
-
-Rules respected:
-- Mandatory libraries loaded first
-- Exactly two blank lines between every command
-- Construction pattern used:
-  DynamicClassCreator → CreateTextFile → DynamicDelegateCreator → ClassFieldCloner/ClassMethodCloner → RunClass
-- Field cloning is definition-only; initialization is done in initTarget()
-
+EXAMPLE PIPE — NUMBER GUESSING GAME
+==================================
 
 DynamicJarLoader --library net.bytebuddy:byte-buddy:1.15.3
 

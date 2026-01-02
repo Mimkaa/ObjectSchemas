@@ -165,8 +165,7 @@ class StechenGPTSummarizer:
                         f"--name {payload.get('file_name','')} "
                         f"(content_text_len={len(payload.get('content_text') or '')}, content_ref={payload.get('content_ref')})"
                     )
-                elif script == "CreateTextFileFromBase64":
-                    sig = f"--name {payload.get('file_name','')} (content_b64_len={len(payload.get('content_b64') or '')})"
+
                 elif script == "DynamicDelegateCreator":
                     sig = (
                         f"--parent {payload.get('parent','')} "
