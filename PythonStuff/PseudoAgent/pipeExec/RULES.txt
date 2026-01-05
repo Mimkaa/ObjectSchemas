@@ -350,5 +350,7 @@ ClassMethodCloner --classNameToModify GuessGame --delegateclass DynamicDelegate 
 RunClass --class GuessGame
 
 
+IF YOU SEE THE SAME ERROR AFTER 2 CIRCLES OF ATTEMPTS TO FIX IT JUST CREATE A NEW CLASS AND TRY A DIFFERENT STRATEGY
+
 END OF SPEC
 -----------

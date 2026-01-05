@@ -15,6 +15,13 @@
 # EXTRA:
 # - Hard forbid CreateTextFileFromBase64 in executor (per your RULES).
 #
+# NEW (ANTI-DEADLOCK):
+# - Each Java tool runs in its own process with a hard timeout (default 3s).
+# - If it exceeds timeout:
+#     -> create .ready file in WORK_DIR
+#     -> kill the process
+#     -> treat as SUCCESS (so autoloop can stop cleanly when it sees .ready)
+#
 
 import os
 import sys
@@ -63,6 +70,9 @@ CLASSPATH_SEP = ";" if os.name == "nt" else ":"
 
 PRINT_SUCCESS = os.getenv("STECHEN_PRINT_SUCCESS", "0").strip() in ("1", "true", "True", "YES", "yes")
 
+# NEW: step timeout (seconds). If exceeded -> create .ready + kill.
+STEP_TIMEOUT_SEC = float(os.getenv("STECHEN_STEP_TIMEOUT_SEC", "7"))
+
 
 # =========================================================
 # UTIL
@@ -106,6 +116,22 @@ def print_block(title: str, text: str) -> None:
     print("-" * 80)
     print(text if text else "<empty>")
     print("=" * 80 + "\n")
+
+
+def create_ready_file() -> Path:
+    """
+    Create .ready in WORK_DIR to signal the supervisor (autoloop) to halt.
+    """
+    p = WORK_DIR / ".ready"
+    try:
+        p.write_text("READY\n", encoding="utf-8", errors="replace")
+    except Exception:
+        try:
+            with open(p, "w", encoding="utf-8", errors="replace") as f:
+                f.write("READY\n")
+        except Exception:
+            pass
+    return p
 
 
 # =========================================================
@@ -168,27 +194,70 @@ def compile_java(script_name: str) -> None:
 
 
 def run_java(script_name: str, argv: List[str]) -> Tuple[str, bool]:
+    """
+    Runs a Java tool in its own process.
+    Waits up to STEP_TIMEOUT_SEC. If timeout:
+      - writes .ready in WORK_DIR
+      - kills the process
+      - returns a SUCCESS-style message (semantic_fail=False)
+    """
     cp = build_classpath()
     cmd = [JAVA_CMD, "-cp", cp, script_name] + argv
     log("[JAVA]", " ".join(cmd))
 
-    res = subprocess.run(
+    p = subprocess.Popen(
         cmd,
         cwd=str(WORK_DIR),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    combined = combine_out(res)
 
-    if res.returncode != 0:
-        raise RuntimeError(combined)
+    try:
+        stdout, stderr = p.communicate(timeout=STEP_TIMEOUT_SEC)
+        combined = (stdout or "") + ("\n" if stdout and stderr else "") + (stderr or "")
 
-    if script_name not in SEMANTIC_ALLOWLIST and looks_like_java_failure(combined):
-        return combined, True
+        if p.returncode != 0:
+            raise RuntimeError(combined)
 
-    return combined, False
+        if script_name not in SEMANTIC_ALLOWLIST and looks_like_java_failure(combined):
+            return combined, True
+
+        return combined, False
+
+    except subprocess.TimeoutExpired:
+        ready_path = create_ready_file()
+
+        # Try to terminate gracefully
+        try:
+            p.terminate()
+        except Exception:
+            pass
+
+        # Small grace window, then hard kill if needed
+        try:
+            stdout, stderr = p.communicate(timeout=0.5)
+        except Exception:
+            stdout, stderr = "", ""
+
+        if p.poll() is None:
+            try:
+                p.kill()
+            except Exception:
+                pass
+
+        msg = (
+            f"[TIMEOUT] Step exceeded {STEP_TIMEOUT_SEC:.1f}s. "
+            f"Created ready signal: {ready_path}. "
+            f"Killed pid={p.pid}.\n"
+        )
+        combined = (stdout or "") + ("\n" if stdout and stderr else "") + (stderr or "")
+        if combined.strip():
+            msg += "\n=== PARTIAL CHILD OUTPUT ===\n" + combined
+
+        return msg, False
 
 
 # =========================================================
@@ -243,6 +312,8 @@ def build_argv_for_step(op: DBOperator, step: Dict[str, Any]) -> Tuple[str, List
             ("field_name", "--fieldB64"),
         ],
         "RunClass": [("class_name", "--classB64"), ("args_text", "--argsB64")],
+        # If you later add CreateReadyFile tool with no args, it will just have no mapping and run with empty argv.
+        # "CreateReadyFile": [],
     }
 
     argv: List[str] = []
@@ -337,7 +408,6 @@ def _exists_variants(name: str) -> Dict[str, bool]:
 
 
 def execute_one_step_and_log(op: DBOperator, step: Dict[str, Any]) -> bool:
-    # FIX: pass op so CreateTextFile can resolve content_ref
     script, argv, human_cmd, decoded = build_argv_for_step(op, step)
 
     op.log_pipeline_long("STEP", "RUN", human_cmd, "Starting execution")

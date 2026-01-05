@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path  # ✅ add
+from pathlib import Path
 
 from db_operator import DBOperator
 
@@ -14,9 +14,10 @@ SLEEP_BETWEEN_ITERATIONS_SEC = 0.2
 DB_PATH = os.getenv("STECHEN_DB_PATH", "stechen.db")
 BOOTSTRAP_RUN_ID = os.getenv("STECHEN_RUN_ID", "bootstrap")
 
-# ✅ add: where we look for the ready signal
-WORK_DIR = Path(os.getenv("STECHEN_WORK_DIR", ".")).resolve()
-READY_FILE = WORK_DIR / ".ready"
+# --------------------------------------------------
+# READY SIGNAL (current working directory)
+# --------------------------------------------------
+READY_FILE = Path(".ready").resolve()
 
 
 def run(cmd, label: str) -> bool:
@@ -83,10 +84,7 @@ def bootstrap_bytebuddy() -> bool:
             pass
 
     label = "BOOTSTRAP EXECUTOR (ByteBuddy)" if inserted else "BOOTSTRAP EXECUTOR (already present)"
-    if not run(EXECUTOR_CMD, label):
-        return False
-
-    return True
+    return run(EXECUTOR_CMD, label)
 
 
 def main():
@@ -101,9 +99,11 @@ def main():
     iteration = 0
 
     while True:
-        # ✅ BREAK CONDITION: stop if an interactive script signaled readiness
+        # --------------------------------------------------
+        # HARD STOP: .ready exists in CURRENT DIRECTORY
+        # --------------------------------------------------
         if READY_FILE.exists():
-            print(f"\n[HALT] Found ready signal: {READY_FILE}")
+            print(f"\n[HALT] Found .ready file: {READY_FILE}")
             break
 
         iteration += 1
@@ -117,9 +117,9 @@ def main():
         if not run(EXECUTOR_CMD, "SINGLE STEP EXECUTOR"):
             break
 
-        # ✅ optional: also check immediately after execution (faster stop)
+        # Immediate stop after execution (no extra iteration)
         if READY_FILE.exists():
-            print(f"\n[HALT] Found ready signal after execution: {READY_FILE}")
+            print(f"\n[HALT] Found .ready file after execution: {READY_FILE}")
             break
 
         time.sleep(SLEEP_BETWEEN_ITERATIONS_SEC)
