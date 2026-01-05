@@ -83,7 +83,11 @@ public class DynamicJarLoader {
     // ==================================================
     private static List<String> suggestCoords(String artifactId, String version) {
         // 1) Best case: exact artifact+version => find correct groupId(s)
-        List<String> exact = searchCentral("a:\"" + escQ(artifactId) + "\" AND v:\"" + escQ(version) + "\"", 10);
+        List<CentralDoc> exact = searchCentral(
+                "a:\"" + escQ(artifactId) + "\" AND v:\"" + escQ(version) + "\"",
+                10
+        );
+
         List<String> exactMatches = new ArrayList<>();
         for (CentralDoc d : exact) {
             if (artifactId.equals(d.a) && version.equals(d.v)) {
@@ -94,7 +98,11 @@ public class DynamicJarLoader {
         if (!exactMatches.isEmpty()) return exactMatches;
 
         // 2) Fallback: artifact only => show likely groups + hint to check versions
-        List<String> byArtifact = searchCentral("a:\"" + escQ(artifactId) + "\"", 10);
+        List<CentralDoc> byArtifact = searchCentral(
+                "a:\"" + escQ(artifactId) + "\"",
+                10
+        );
+
         List<String> guesses = new ArrayList<>();
         for (CentralDoc d : byArtifact) {
             if (artifactId.equals(d.a)) {
@@ -115,11 +123,15 @@ public class DynamicJarLoader {
 
     private static class CentralDoc {
         final String g, a, v;
-        CentralDoc(String g, String a, String v) { this.g = g; this.a = a; this.v = v; }
+        CentralDoc(String g, String a, String v) {
+            this.g = g;
+            this.a = a;
+            this.v = v;
+        }
     }
 
     private static List<CentralDoc> searchCentral(String query, int rows) {
-        // Maven Central search endpoint (Solr). We keep it dependency-free:
+        // Maven Central search endpoint (Solr). Dependency-free parsing:
         // https://search.maven.org/solrsearch/select?q=...&rows=...&wt=json
         String url = "https://search.maven.org/solrsearch/select?q=" + urlEncode(query)
                 + "&rows=" + rows + "&wt=json";
@@ -134,7 +146,10 @@ public class DynamicJarLoader {
 
     private static String urlEncode(String s) {
         // small encoder sufficient for our query strings
-        return s.replace(" ", "%20").replace("\"", "%22").replace(":", "%3A").replace("\\", "%5C");
+        return s.replace(" ", "%20")
+                .replace("\"", "%22")
+                .replace(":", "%3A")
+                .replace("\\", "%5C");
     }
 
     private static String httpGetText(String url) throws IOException {
@@ -166,6 +181,7 @@ public class DynamicJarLoader {
         while (true) {
             int gPos = json.indexOf("\"g\":\"", i);
             if (gPos < 0) break;
+
             int aPos = json.indexOf("\"a\":\"", gPos);
             int vPos = json.indexOf("\"v\":\"", gPos);
             if (aPos < 0 || vPos < 0) break;
@@ -177,7 +193,7 @@ public class DynamicJarLoader {
             out.add(new CentralDoc(g, a, v));
             i = vPos + 5;
 
-            if (out.size() >= 20) break; // safety cap
+            if (out.size() >= 50) break; // safety cap
         }
         return out;
     }
@@ -203,7 +219,10 @@ public class DynamicJarLoader {
 
     private static class HttpStatusIOException extends IOException {
         final int status;
-        HttpStatusIOException(int status, String msg) { super(msg); this.status = status; }
+        HttpStatusIOException(int status, String msg) {
+            super(msg);
+            this.status = status;
+        }
     }
 
     // 🧠 CLI Entry Point
@@ -232,6 +251,8 @@ public class DynamicJarLoader {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
+
+                // ----- compact form (plain + B64)
                 case "--library" -> {
                     if (i + 1 < args.length) {
                         String[] parts = args[++i].split(":");
@@ -265,6 +286,8 @@ public class DynamicJarLoader {
                         return;
                     }
                 }
+
+                // ----- explicit form (plain + B64)
                 case "--group" -> { if (i + 1 < args.length) groupId = args[++i]; }
                 case "--artifact" -> { if (i + 1 < args.length) artifactId = args[++i]; }
                 case "--version" -> { if (i + 1 < args.length) version = args[++i]; }
@@ -273,7 +296,9 @@ public class DynamicJarLoader {
                 case "--artifactB64" -> { if (i + 1 < args.length) artifactId = decodeB64Utf8(args[++i]); }
                 case "--versionB64" -> { if (i + 1 < args.length) version = decodeB64Utf8(args[++i]); }
 
-                default -> { /* ignore */ }
+                default -> {
+                    // ignore unknown tokens
+                }
             }
         }
 

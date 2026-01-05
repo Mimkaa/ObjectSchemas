@@ -1,4 +1,4 @@
 
-make a program that will be reading the images from the webcam and printing them in the command prompt using ascii
+make a program that will be reading the images from the webcam and printing them in the command prompt using ascii and use for it OpenCV library
 
 IMPORTANT: terminate the program as soon as .ready file appears in the current directory or the "q" is pressed
